@@ -1,0 +1,16 @@
+# Rust target directory
+x64dbg-mcp-rust/target/
+
+# Vendor folder (references only)
+vendor/
+
+# Visual Studio files
+.vs/
+*.sln
+*.vcxproj
+*.user
+*.suo
+
+# Temporary files
+*.tmp
+*.bak

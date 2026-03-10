@@ -1,0 +1,20 @@
+[package]
+name = "x64dbg-mcp-rust"
+version = "0.1.0"
+edition = "2021"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+rmcp = { path = "../vendor/rust-sdk-rmcp-v1.1.1/crates/rmcp", features = ["server", "transport-streamable-http-server"] }
+tokio = { version = "1.37.0", features = ["full"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+anyhow = "1.0"
+axum = { version = "0.8", features = ["macros"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[build-dependencies]
+bindgen = "0.69.4"
