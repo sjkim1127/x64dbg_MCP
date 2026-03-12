@@ -166,6 +166,7 @@ impl ServerHandler for X64DbgMcpServer {
                     .prompts(PromptCapabilities {
                         list_changed: Some(false),
                     })
+                    .logging()
                     .build(),
             )
             .with_server_info(Implementation::new("x64dbg-rust-mcp", "0.1.0")))
@@ -177,6 +178,17 @@ impl ServerHandler for X64DbgMcpServer {
         _cx: RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<(), ErrorData>> + Send + '_ {
         async move { Ok(()) }
+    }
+
+    fn set_level(
+        &self,
+        request: SetLevelRequestParams,
+        _cx: RequestContext<RoleServer>,
+    ) -> impl Future<Output = Result<(), ErrorData>> + Send + '_ {
+        async move {
+            log_print(&format!("MCP Client changed log level to: {:?}\n", request.level));
+            Ok(())
+        }
     }
 
     fn list_resources(
@@ -587,10 +599,33 @@ impl ServerHandler for X64DbgMcpServer {
                     let args: ExecuteScriptArgs = serde_json::from_value(Value::Object(request.arguments.unwrap_or_default()))
                         .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
                     
+                    let total = args.commands.len() as f64;
                     let mut results = Vec::new();
                     let mut all_success = true;
 
-                    for cmd_str in args.commands {
+                    // Parse progress token from request meta if provided
+                    let mut progress_token = None;
+                    if let Some(meta) = request.meta {
+                        if let Some(serde_json::Value::String(token)) = meta.0.get("progressToken") {
+                            progress_token = Some(ProgressToken(NumberOrString::String(token.clone())));
+                        } else if let Some(serde_json::Value::Number(token)) = meta.0.get("progressToken") {
+                            if let Some(n) = token.as_i64() {
+                                progress_token = Some(ProgressToken(NumberOrString::Number(n)));
+                            }
+                        }
+                    }
+
+                    for (i, cmd_str) in args.commands.into_iter().enumerate() {
+                        // Send progress update
+                        if let Some(token) = &progress_token {
+                            let progress_param = ProgressNotificationParam::new(token.clone(), i as f64)
+                                .with_total(total)
+                                .with_message(format!("Executing ({}/{}): {}", i+1, total as usize, cmd_str));
+                            
+                            // Fire and forget progress notification
+                            let _ = cx.peer.notify_progress(progress_param).await;
+                        }
+
                         let cmd_c = CString::new(cmd_str.clone())
                             .map_err(|_| ErrorData::invalid_params("Invalid command format", None))?;
                             
@@ -604,6 +639,14 @@ impl ServerHandler for X64DbgMcpServer {
                             all_success = false;
                             break; // Stop execution on first failure
                         }
+                    }
+                    
+                    // Final progress update
+                    if let Some(token) = &progress_token {
+                         let progress_param = ProgressNotificationParam::new(token.clone(), total)
+                             .with_total(total)
+                             .with_message("Script execution completed.");
+                         let _ = cx.peer.notify_progress(progress_param).await;
                     }
                     
                     let result_text = results.join("\n");
