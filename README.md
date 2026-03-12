@@ -50,6 +50,7 @@ Register the following SSE endpoint in your AI tool (e.g., Cursor, Claude Deskto
 
 ## 🧩 Available Tools (MCP Tools)
 - `ExecuteCommand`: Execute any internal x64dbg command (e.g., `init`, `run`, `bp`).
+- `ExecuteScript`: Execute a sequence of x64dbg commands in order.
 - `ReadMemory` / `WriteMemory`: Read from or write to the debuggee's memory at a specific address.
 - `EvaluateExpression`: Evaluate mathematical expressions or resolve addresses (e.g. `[esp+8]`, `rax+0x10`).
 - `Disassemble`: Get disassembly of instructions starting at a specific address.

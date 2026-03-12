@@ -79,6 +79,11 @@ struct ExecuteCommandArgs {
 }
 
 #[derive(Debug, Deserialize)]
+struct ExecuteScriptArgs {
+    commands: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
 struct ReadMemoryArgs {
     address: String, // hex string
     size: usize,
@@ -171,6 +176,21 @@ impl ServerHandler for X64DbgMcpServer {
                                 "command": { "type": "string", "description": "The command to execute" }
                             },
                             "required": ["command"]
+                        })))
+                    ),
+                    Tool::new(
+                        "ExecuteScript",
+                        "Executes a list of x64dbg commands sequentially (useful for batch operations)",
+                        Arc::new(to_json_object(json!({
+                            "type": "object",
+                            "properties": {
+                                "commands": { 
+                                    "type": "array", 
+                                    "items": { "type": "string" },
+                                    "description": "List of x64dbg commands to execute in order" 
+                                }
+                            },
+                            "required": ["commands"]
                         })))
                     ),
                     Tool::new(
@@ -333,6 +353,36 @@ impl ServerHandler for X64DbgMcpServer {
                     }).await;
                     
                     Ok(CallToolResult::success(vec![Content::text(format!("Success: {}", success))]))
+                }
+                "ExecuteScript" => {
+                    let args: ExecuteScriptArgs = serde_json::from_value(Value::Object(request.arguments.unwrap_or_default()))
+                        .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+                    
+                    let mut results = Vec::new();
+                    let mut all_success = true;
+
+                    for cmd_str in args.commands {
+                        let cmd_c = CString::new(cmd_str.clone())
+                            .map_err(|_| ErrorData::invalid_params("Invalid command format", None))?;
+                            
+                        let success = run_on_gui_thread(move || {
+                            unsafe { DbgCmdExecDirect(cmd_c.as_ptr()) }
+                        }).await;
+                        
+                        results.push(format!("Command '{}' -> Success: {}", cmd_str, success));
+                        
+                        if !success {
+                            all_success = false;
+                            break; // Stop execution on first failure
+                        }
+                    }
+                    
+                    let result_text = results.join("\n");
+                    if all_success {
+                        Ok(CallToolResult::success(vec![Content::text(result_text)]))
+                    } else {
+                        Ok(CallToolResult::error(vec![Content::text(format!("Script failed:\n{}", result_text))]))
+                    }
                 }
                 "ReadMemory" => {
                     let args: ReadMemoryArgs = serde_json::from_value(Value::Object(request.arguments.unwrap_or_default()))
