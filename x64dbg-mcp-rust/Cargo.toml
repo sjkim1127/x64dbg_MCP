@@ -7,7 +7,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-rmcp = { version = "1.2.0", features = ["server", "transport-streamable-http-server"] }
+rmcp = { version = "1.2.0", features = ["server", "transport-streamable-http-server", "elicitation", "schemars"] }
 crossbeam-channel = "0.5"
 tokio = { version = "1.37.0", features = ["full"] }
 serde = { version = "1.0", features = ["derive"] }
