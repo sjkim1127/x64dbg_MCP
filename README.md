@@ -49,9 +49,14 @@ Register the following SSE endpoint in your AI tool (e.g., Cursor, Claude Deskto
 ---
 
 ## 🧩 Available Tools (MCP Tools)
-- `ExecuteDebuggerCommand`: Execute any internal x64dbg command (e.g., `init`, `run`, `bp`).
+- `ExecuteCommand`: Execute any internal x64dbg command (e.g., `init`, `run`, `bp`).
 - `ReadMemory`: Read memory from the debuggee at a specific address and return hex/text data.
-- *(Planned)*: Register Read/Write, Stack Trace, Breakpoint Management, and more.
+- `GetRegisters` / `SetRegister`: Read and write general-purpose registers.
+- `GetBreakpoints` / `SetBreakpoint`: List and set software breakpoints.
+- `GetThreads`: List all threads in the process.
+- `GetModules`: List all loaded modules in the process.
+- `GetCallStack`: Get the current call stack for the active thread.
+- `SetComment` / `SetLabel`: Set a comment or label at a specific address.
 
 ---
 
