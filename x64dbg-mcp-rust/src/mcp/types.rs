@@ -27,3 +27,23 @@ pub struct SetCommentLabelArgs {
     pub address: String,
     pub text: String,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct YaraScanMemArgs {
+    pub start: String,
+    pub size: String,
+    pub rule: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct StructFieldDef {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub field_type: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StructDumpMemArgs {
+    pub address: String,
+    pub fields: Vec<StructFieldDef>,
+}

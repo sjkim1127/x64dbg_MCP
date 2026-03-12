@@ -264,6 +264,53 @@ impl ServerHandler for X64DbgMcpServer {
                         })))
                     ),
                     Tool::new(
+                        "Misc_ParseExpression",
+                        "Evaluates a complex expression (e.g. '[eax]+4') via '? expr' and returns the evaluated integer.",
+                        Arc::new(to_json_object(json!({
+                            "type": "object",
+                            "properties": {
+                                "expression": { "type": "string", "description": "Expression to evaluate (e.g., 'rax+8')" }
+                            },
+                            "required": ["expression"]
+                        }))),
+                    ),
+                    Tool::new(
+                        "YaraScanMem",
+                        "Scans a chunk of memory using a given YARA rule. Automatically applies pure rust Boreal engine.",
+                        Arc::new(to_json_object(json!({
+                            "type": "object",
+                            "properties": {
+                                "start": { "type": "string", "description": "Start address in hex (e.g., '0x401000')" },
+                                "size": { "type": "string", "description": "Size to read and scan in hex (e.g., '0x1000')" },
+                                "rule": { "type": "string", "description": "The raw YARA rule string text" }
+                            },
+                            "required": ["start", "size", "rule"]
+                        }))),
+                    ),
+                    Tool::new(
+                        "StructDumpMem",
+                        "Dumps a C-like structure from memory into a parsed JSON representation.",
+                        Arc::new(to_json_object(json!({
+                            "type": "object",
+                            "properties": {
+                                "address": { "type": "string", "description": "Start address in hex" },
+                                "fields": {
+                                    "type": "array",
+                                    "description": "List of struct fields containing name and type. Supported types: u8, u16, u32, u64, i8, i16, i32, i64, f32, f64, char[N], u8[N], ptr",
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "name": { "type": "string" },
+                                            "type": { "type": "string", "description": "e.g., 'u32', 'char[16]', 'ptr'" }
+                                        },
+                                        "required": ["name", "type"]
+                                    }
+                                }
+                            },
+                            "required": ["address", "fields"]
+                        }))),
+                    ),
+                    Tool::new(
                         "MiscParseExpression",
                         "Parse x64dbg expression (e.g. [eax+4])",
                         Arc::new(to_json_object(json!({
@@ -309,7 +356,13 @@ impl ServerHandler for X64DbgMcpServer {
                 "PatternFindMem" => handle_pattern_find_mem(request).await,
                 "MemoryIsValidPtr" => handle_memory_is_valid_ptr(request).await,
                 "MiscParseExpression" => handle_misc_parse_expression(request).await,
-                _ => Err(ErrorData::method_not_found::<CallToolRequestMethod>()),
+                "Misc_ParseExpression" => tools::handle_misc_parse_expression(request).await,
+                "YaraScanMem" => tools::handle_yara_scan_mem(request).await,
+                "StructDumpMem" => tools::handle_struct_dump_mem(request).await,
+                _ => Err(ErrorData::invalid_params(
+                    format!("Unknown tool: {}", request.name),
+                    None,
+                )),
             }
         }
     }
