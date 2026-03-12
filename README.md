@@ -61,6 +61,14 @@ Register the following SSE endpoint in your AI tool (e.g., Cursor, Claude Deskto
 - `GetCallStack`: Get the current call stack for the active thread.
 - `SetComment` / `SetLabel`: Set a comment or label at a specific address.
 
+### Advanced Control & Sanning
+- `DebugRun` / `DebugPause` / `DebugStop`: Control the remote execution state of the debuggee.
+- `DebugStepIn` / `DebugStepOver` / `DebugStepOut`: Fine-grained instruction stepping.
+- `AssembleMem`: Assemble mnemonic instructions (e.g., `mov eax, 1`) and write them directly into memory.
+- `PatternFindMem`: Search memory for specific byte patterns (e.g., `48 8b 05 ? ? ?`).
+- `MemoryIsValidPtr`: Verify whether a remote memory pointer is currently assigned and readable.
+- `MiscParseExpression`: Parse internal x64dbg expressions, flags, and registers (e.g., `[eax+4]`).
+
 ---
 
 ## 📂 Project Structure
