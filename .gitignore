@@ -2,7 +2,8 @@
 x64dbg-mcp-rust/target/
 
 # Vendor folder (references only)
-vendor/
+vendor/*
+!vendor/x64dbg-pluginsdk/
 
 # Visual Studio files
 .vs/
