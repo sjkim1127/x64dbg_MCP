@@ -150,6 +150,9 @@ impl ServerHandler for X64DbgMcpServer {
                         subscribe: Some(false),
                         list_changed: Some(false),
                     })
+                    .prompts(PromptCapabilities {
+                        list_changed: Some(false),
+                    })
                     .build(),
             )
             .with_server_info(Implementation::new("x64dbg-rust-mcp", "0.1.0")))
@@ -297,6 +300,67 @@ impl ServerHandler for X64DbgMcpServer {
                 contents: vec![ResourceContents::text(content, uri).with_mime_type("application/json")],
                 meta: None,
             })
+        }
+    }
+
+    fn list_prompts(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _cx: RequestContext<RoleServer>,
+    ) -> impl Future<Output = Result<ListPromptsResult, ErrorData>> + Send + '_ {
+        async move {
+            Ok(ListPromptsResult {
+                prompts: vec![
+                    Prompt::new(
+                        "analyze_crash",
+                        Some("Analyze the crash at the current instruction pointer"),
+                        None,
+                    ),
+                    Prompt::new(
+                        "find_main",
+                        Some("Trace execution from the current entry point to find the main function"),
+                        None,
+                    ),
+                ],
+                next_cursor: None,
+                meta: None,
+            })
+        }
+    }
+
+    fn get_prompt(
+        &self,
+        request: GetPromptRequestParams,
+        _cx: RequestContext<RoleServer>,
+    ) -> impl Future<Output = Result<GetPromptResult, ErrorData>> + Send + '_ {
+        async move {
+            match request.name.as_str() {
+                "analyze_crash" => {
+                    Ok(GetPromptResult {
+                        description: Some("Analyze the crash at the current instruction pointer. Check registers and stack.".to_string()),
+                        messages: vec![
+                            PromptMessage::new_text(
+                                PromptMessageRole::User,
+                                "I need to analyze why the program crashed. Please read the current registers, disassemble around the current instruction pointer (RIP/EIP), and check the current call stack. Summarize the likely cause of the crash.",
+                            )
+                        ],
+                        meta: None,
+                    })
+                },
+                "find_main" => {
+                    Ok(GetPromptResult {
+                        description: Some("Trace execution from the current entry point to find the main function.".to_string()),
+                        messages: vec![
+                            PromptMessage::new_text(
+                                PromptMessageRole::User,
+                                "The debugger is currently at the entry point of the executable. Please step through the initialization code (typically CRT startup) and locate the actual user main/WinMain function. Provide the address of the main function.",
+                            )
+                        ],
+                        meta: None,
+                    })
+                },
+                _ => Err(ErrorData::invalid_params(format!("Prompt not found: {}", request.name), None)),
+            }
         }
     }
 
