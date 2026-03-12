@@ -2,7 +2,7 @@ use super::tools::*;
 use crate::x64dbg::api::log_print;
 use rmcp::{
     model::*,
-    service::RequestContext,
+    service::{Peer, RequestContext},
     RoleServer, ServerHandler,
     ErrorData,
     transport::{
@@ -11,8 +11,35 @@ use rmcp::{
     },
 };
 use std::future::Future;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use once_cell::sync::Lazy;
 use serde_json::{json, Value};
+
+pub static GLOBAL_PEERS: Lazy<Mutex<Vec<Peer<RoleServer>>>> = Lazy::new(|| Mutex::new(Vec::new()));
+
+pub async fn broadcast_event(level: LoggingLevel, data: Value) {
+    let peers = if let Ok(mut peers) = GLOBAL_PEERS.lock() {
+        peers.retain(|p| !p.is_transport_closed());
+        peers.clone()
+    } else {
+        return;
+    };
+    
+    for peer in peers {
+        let notif = ServerNotification::LoggingMessageNotification(
+            LoggingMessageNotification {
+                params: LoggingMessageNotificationParam {
+                    level,
+                    data: data.clone(),
+                    logger: Some("x64dbg".to_string()),
+                },
+                method: LoggingMessageNotificationMethod,
+                extensions: Default::default(),
+            }
+        );
+        let _ = peer.send_notification(notif).await;
+    }
+}
 
 fn to_json_object(v: Value) -> JsonObject {
     if let Value::Object(m) = v {
@@ -29,9 +56,13 @@ impl ServerHandler for X64DbgMcpServer {
     fn initialize(
         &self,
         _request: InitializeRequestParams,
-        _cx: RequestContext<RoleServer>,
+        cx: RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<InitializeResult, ErrorData>> + Send + '_ {
+        let peer = cx.peer.clone();
         async move {
+            if let Ok(mut peers) = GLOBAL_PEERS.lock() {
+                peers.push(peer);
+            }
             Ok(InitializeResult::new(
                 ServerCapabilities::builder()
                     .enable_tools()
@@ -287,6 +318,17 @@ impl ServerHandler for X64DbgMcpServer {
 #[tokio::main]
 pub async fn start_mcp_server() {
     log_print("Starting MCP server listener on http://127.0.0.1:50301/mcp/sse ...\n");
+    
+    // Start background event loop for sending notifications to all peers
+    if let Ok(mut lock) = super::events::EVENT_RX.lock() {
+        if let Some(mut rx) = lock.take() {
+            tokio::spawn(async move {
+                while let Some(event) = rx.recv().await {
+                    broadcast_event(LoggingLevel::Info, event).await;
+                }
+            });
+        }
+    }
     
     let server = X64DbgMcpServer;
     let config = StreamableHttpServerConfig {

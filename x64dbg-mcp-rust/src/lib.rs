@@ -28,6 +28,14 @@ pub extern "C" fn pluginit(init_struct: *mut PLUG_INITSTRUCT) -> bool {
 
     log_print("MCP Server (Rust) initialized!\n");
 
+    mcp::events::register_callbacks(unsafe { (*init_struct).pluginHandle });
+
+    // Initialize the event channel
+    let _ = mcp::events::EVENT_TX.send(serde_json::json!({
+        "event": "PLUGIN_START",
+        "message": "x64dbg MCP plugin started"
+    }));
+
     // Start MCP server in a background thread
     thread::spawn(|| {
         start_mcp_server();
