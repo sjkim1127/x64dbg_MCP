@@ -7,3 +7,9 @@
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
 
 pub mod api;
+
+use std::os::raw::c_void;
+
+extern "C" {
+    pub fn GuiExecuteOnGuiThreadEx(cb: extern "C" fn(*mut c_void), userdata: *mut c_void);
+}

@@ -1920,6 +1920,7 @@ dependencies = [
  "axum",
  "bindgen",
  "crossbeam-channel",
+ "once_cell",
  "rmcp",
  "schemars",
  "serde",
