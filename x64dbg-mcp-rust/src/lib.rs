@@ -131,6 +131,11 @@ struct SetCommentLabelArgs {
     text: String,
 }
 
+#[derive(Debug, Deserialize)]
+struct SampleLLMArgs {
+    prompt: String,
+}
+
 fn to_json_object(v: Value) -> JsonObject {
     if let Value::Object(m) = v {
         m
@@ -407,6 +412,17 @@ impl ServerHandler for X64DbgMcpServer {
                         })))
                     ),
                     Tool::new(
+                        "SampleLLM",
+                        "Requests the AI to generate a response for a given prompt (Server-directed sampling)",
+                        Arc::new(to_json_object(json!({
+                            "type": "object",
+                            "properties": {
+                                "prompt": { "type": "string", "description": "The prompt or question to ask the LLM" }
+                            },
+                            "required": ["prompt"]
+                        })))
+                    ),
+                    Tool::new(
                         "ReadMemory",
                         "Reads memory from the debuggee",
                         Arc::new(to_json_object(json!({
@@ -595,6 +611,29 @@ impl ServerHandler for X64DbgMcpServer {
                         Ok(CallToolResult::success(vec![Content::text(result_text)]))
                     } else {
                         Ok(CallToolResult::error(vec![Content::text(format!("Script failed:\n{}", result_text))]))
+                    }
+                }
+                "SampleLLM" => {
+                    let args: SampleLLMArgs = serde_json::from_value(Value::Object(request.arguments.unwrap_or_default()))
+                        .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+                    
+                    let params = CreateMessageRequestParams {
+                        messages: vec![SamplingMessage::user_text(args.prompt)],
+                        max_tokens: 1000,
+                        ..Default::default()
+                    };
+
+                    match cx.peer.create_message(params).await {
+                        Ok(result) => {
+                            let mut response_text = String::new();
+                            if let SamplingMessageContent::Text(text_content) = &result.message.content.into_inner().unwrap() {
+                                response_text = text_content.text.clone();
+                            }
+                            Ok(CallToolResult::success(vec![Content::text(format!("LLM Response:\n{}", response_text))]))
+                        }
+                        Err(e) => {
+                            Ok(CallToolResult::error(vec![Content::text(format!("Sampling failed: {}", e))]))
+                        }
                     }
                 }
                 "ReadMemory" => {
