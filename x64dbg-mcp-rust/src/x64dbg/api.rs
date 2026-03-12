@@ -6,15 +6,19 @@ use std::collections::HashSet;
 pub const MEM_IMAGE_VAL: u32 = 0x1000000;
 
 pub fn log_print(msg: &str) {
-    let msg_c = CString::new(msg).unwrap();
-    unsafe {
-        _plugin_logputs(msg_c.as_ptr());
+    if let Ok(msg_c) = CString::new(msg) {
+        unsafe {
+            _plugin_logputs(msg_c.as_ptr());
+        }
     }
 }
 
 pub fn execute_command_api(cmd: &str) -> bool {
-    let cmd_c = CString::new(cmd).unwrap();
-    unsafe { DbgCmdExecDirect(cmd_c.as_ptr()) }
+    if let Ok(cmd_c) = CString::new(cmd) {
+        unsafe { DbgCmdExecDirect(cmd_c.as_ptr()) }
+    } else {
+        false
+    }
 }
 
 pub fn read_memory_api(addr: duint, size: usize) -> Option<Vec<u8>> {
@@ -50,7 +54,7 @@ pub fn get_breakpoints_api() -> Vec<serde_json::Value> {
             bplist.push(serde_json::json!({
                 "address": format!("0x{:X}", bp.addr),
                 "enabled": bp.enabled,
-                "name": unsafe { CStr::from_ptr(bp.name.as_ptr()).to_string_lossy() },
+                "name": if bp.name.as_ptr().is_null() { String::new() } else { unsafe { CStr::from_ptr(bp.name.as_ptr()).to_string_lossy().into_owned() } },
                 "hit_count": bp.hitCount
             }));
         }
@@ -70,7 +74,7 @@ pub fn get_threads_api() -> Vec<serde_json::Value> {
             tlist.push(serde_json::json!({
                 "id": t.BasicInfo.ThreadId,
                 "address": format!("0x{:X}", t.BasicInfo.ThreadStartAddress),
-                "name": unsafe { CStr::from_ptr(t.BasicInfo.threadName.as_ptr()).to_string_lossy() }
+                "name": if t.BasicInfo.threadName.as_ptr().is_null() { String::new() } else { unsafe { CStr::from_ptr(t.BasicInfo.threadName.as_ptr()).to_string_lossy().into_owned() } }
             }));
         }
         unsafe { BridgeFree(thread_list.list as *mut c_void) };
@@ -90,7 +94,7 @@ pub fn get_modules_api() -> Vec<serde_json::Value> {
             let page = unsafe { *mem_map.page.add(i as usize) };
             let base = page.mbi.AllocationBase as usize;
             if page.mbi.Type == MEM_IMAGE_VAL && !seen_bases.contains(&base) {
-                let name = unsafe { CStr::from_ptr(page.info.as_ptr()).to_string_lossy() };
+                let name = if page.info.as_ptr().is_null() { String::new() } else { unsafe { CStr::from_ptr(page.info.as_ptr()).to_string_lossy().into_owned() } };
                 if !name.is_empty() {
                     mlist.push(serde_json::json!({
                         "base": format!("0x{:X}", base),
@@ -117,19 +121,26 @@ pub fn get_call_stack_api() -> Vec<serde_json::Value> {
                 "address": format!("0x{:X}", entry.addr),
                 "from": format!("0x{:X}", entry.from),
                 "to": format!("0x{:X}", entry.to),
-                "comment": unsafe { CStr::from_ptr(entry.comment.as_ptr()).to_string_lossy() }
+                "comment": if entry.comment.as_ptr().is_null() { String::new() } else { unsafe { CStr::from_ptr(entry.comment.as_ptr()).to_string_lossy().into_owned() } }
             }));
         }
+        unsafe { BridgeFree(call_stack.entries as *mut c_void) };
     }
     cs_list
 }
 
 pub fn set_comment_at_api(addr: duint, text: &str) -> bool {
-    let text_c = CString::new(text).unwrap();
-    unsafe { DbgSetCommentAt(addr, text_c.as_ptr()) }
+    if let Ok(text_c) = CString::new(text) {
+        unsafe { DbgSetCommentAt(addr, text_c.as_ptr()) }
+    } else {
+        false
+    }
 }
 
 pub fn set_label_at_api(addr: duint, text: &str) -> bool {
-    let text_c = CString::new(text).unwrap();
-    unsafe { DbgSetLabelAt(addr, text_c.as_ptr()) }
+    if let Ok(text_c) = CString::new(text) {
+        unsafe { DbgSetLabelAt(addr, text_c.as_ptr()) }
+    } else {
+        false
+    }
 }
