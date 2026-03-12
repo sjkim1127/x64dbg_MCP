@@ -165,6 +165,83 @@ impl ServerHandler for X64DbgMcpServer {
                             },
                             "required": ["address", "text"]
                         })))
+                    ),
+                    Tool::new(
+                        "DebugRun",
+                        "Resume execution of the debugged process",
+                        Arc::new(to_json_object(json!({ "type": "object", "properties": {} })))
+                    ),
+                    Tool::new(
+                        "DebugPause",
+                        "Pause execution of the debugged process",
+                        Arc::new(to_json_object(json!({ "type": "object", "properties": {} })))
+                    ),
+                    Tool::new(
+                        "DebugStop",
+                        "Stop debugging",
+                        Arc::new(to_json_object(json!({ "type": "object", "properties": {} })))
+                    ),
+                    Tool::new(
+                        "DebugStepIn",
+                        "Step into the next instruction",
+                        Arc::new(to_json_object(json!({ "type": "object", "properties": {} })))
+                    ),
+                    Tool::new(
+                        "DebugStepOver",
+                        "Step over the next instruction",
+                        Arc::new(to_json_object(json!({ "type": "object", "properties": {} })))
+                    ),
+                    Tool::new(
+                        "DebugStepOut",
+                        "Step out of the current function",
+                        Arc::new(to_json_object(json!({ "type": "object", "properties": {} })))
+                    ),
+                    Tool::new(
+                        "AssembleMem",
+                        "Assemble instruction directly into memory",
+                        Arc::new(to_json_object(json!({
+                            "type": "object",
+                            "properties": {
+                                "address": { "type": "string", "description": "Hex address" },
+                                "instruction": { "type": "string", "description": "Assembly string" }
+                            },
+                            "required": ["address", "instruction"]
+                        })))
+                    ),
+                    Tool::new(
+                        "PatternFindMem",
+                        "Find pattern in memory",
+                        Arc::new(to_json_object(json!({
+                            "type": "object",
+                            "properties": {
+                                "start": { "type": "string", "description": "Hex start address" },
+                                "size": { "type": "string", "description": "Hex size to search" },
+                                "pattern": { "type": "string", "description": "Byte pattern e.g. 48 8b 05 ? ? ?" }
+                            },
+                            "required": ["start", "size", "pattern"]
+                        })))
+                    ),
+                    Tool::new(
+                        "MemoryIsValidPtr",
+                        "Check if memory address is readable",
+                        Arc::new(to_json_object(json!({
+                            "type": "object",
+                            "properties": {
+                                "address": { "type": "string", "description": "Hex address" }
+                            },
+                            "required": ["address"]
+                        })))
+                    ),
+                    Tool::new(
+                        "MiscParseExpression",
+                        "Parse x64dbg expression (e.g. [eax+4])",
+                        Arc::new(to_json_object(json!({
+                            "type": "object",
+                            "properties": {
+                                "expression": { "type": "string", "description": "Expression string" }
+                            },
+                            "required": ["expression"]
+                        })))
                     )
                 ],
                 next_cursor: None,
@@ -191,6 +268,16 @@ impl ServerHandler for X64DbgMcpServer {
                 "GetCallStack" => handle_get_call_stack(request),
                 "SetComment" => handle_set_comment(request),
                 "SetLabel" => handle_set_label(request),
+                "DebugRun" => handle_debug_run(request),
+                "DebugPause" => handle_debug_pause(request),
+                "DebugStop" => handle_debug_stop(request),
+                "DebugStepIn" => handle_debug_step_in(request),
+                "DebugStepOver" => handle_debug_step_over(request),
+                "DebugStepOut" => handle_debug_step_out(request),
+                "AssembleMem" => handle_assemble_mem(request),
+                "PatternFindMem" => handle_pattern_find_mem(request),
+                "MemoryIsValidPtr" => handle_memory_is_valid_ptr(request),
+                "MiscParseExpression" => handle_misc_parse_expression(request),
                 _ => Err(ErrorData::method_not_found::<CallToolRequestMethod>()),
             }
         }
