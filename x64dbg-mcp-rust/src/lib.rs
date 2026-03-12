@@ -85,6 +85,23 @@ struct ReadMemoryArgs {
 }
 
 #[derive(Debug, Deserialize)]
+struct WriteMemoryArgs {
+    address: String, // hex string
+    data: String,    // hex bytes e.g. "9090"
+}
+
+#[derive(Debug, Deserialize)]
+struct EvaluateExpressionArgs {
+    expression: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct DisassembleArgs {
+    address: String, // hex string
+    count: Option<usize>,
+}
+
+#[derive(Debug, Deserialize)]
 struct SetRegisterArgs {
     register: String,
     value: String, // hex string
@@ -166,6 +183,41 @@ impl ServerHandler for X64DbgMcpServer {
                                 "size": { "type": "integer", "description": "Number of bytes to read" }
                             },
                             "required": ["address", "size"]
+                        })))
+                    ),
+                    Tool::new(
+                        "WriteMemory",
+                        "Writes memory to the debuggee",
+                        Arc::new(to_json_object(json!({
+                            "type": "object",
+                            "properties": {
+                                "address": { "type": "string", "description": "Hex address (e.g. 0x140001000)" },
+                                "data": { "type": "string", "description": "Hex string of bytes to write (e.g. 9090 for NOP NOP)" }
+                            },
+                            "required": ["address", "data"]
+                        })))
+                    ),
+                    Tool::new(
+                        "EvaluateExpression",
+                        "Evaluates a mathematical expression or resolves an address (e.g. [esp+8], rax+0x10)",
+                        Arc::new(to_json_object(json!({
+                            "type": "object",
+                            "properties": {
+                                "expression": { "type": "string", "description": "The expression to evaluate" }
+                            },
+                            "required": ["expression"]
+                        })))
+                    ),
+                    Tool::new(
+                        "Disassemble",
+                        "Gets disassembly of instructions starting at a specific address",
+                        Arc::new(to_json_object(json!({
+                            "type": "object",
+                            "properties": {
+                                "address": { "type": "string", "description": "Hex address to start disassembling from" },
+                                "count": { "type": "integer", "description": "Number of instructions to disassemble (default: 1)" }
+                            },
+                            "required": ["address"]
                         })))
                     ),
                     Tool::new(
@@ -306,6 +358,86 @@ impl ServerHandler for X64DbgMcpServer {
                     } else {
                         Ok(CallToolResult::error(vec![Content::text("Failed to read memory")]))
                     }
+                }
+                "WriteMemory" => {
+                    let args: WriteMemoryArgs = serde_json::from_value(Value::Object(request.arguments.unwrap_or_default()))
+                        .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+                    
+                    let addr = parse_hex(&args.address)?;
+                    
+                    // Parse hex string to bytes
+                    let hex_data = args.data.trim().replace(" ", "");
+                    if hex_data.len() % 2 != 0 {
+                        return Err(ErrorData::invalid_params("Hex data length must be even", None));
+                    }
+                    
+                    let mut buffer = Vec::new();
+                    for i in (0..hex_data.len()).step_by(2) {
+                        let byte_str = &hex_data[i..i+2];
+                        let byte = u8::from_str_radix(byte_str, 16)
+                            .map_err(|_| ErrorData::invalid_params("Invalid hex byte", None))?;
+                        buffer.push(byte);
+                    }
+                    
+                    let size = buffer.len() as duint;
+                    
+                    let success = run_on_gui_thread(move || {
+                        unsafe {
+                            DbgMemWrite(addr, buffer.as_ptr() as *const c_void, size)
+                        }
+                    }).await;
+                    
+                    if success {
+                        Ok(CallToolResult::success(vec![Content::text(format!("Successfully wrote {} bytes to 0x{:X}", size, addr))]))
+                    } else {
+                        Ok(CallToolResult::error(vec![Content::text("Failed to write memory")]))
+                    }
+                }
+                "EvaluateExpression" => {
+                    let args: EvaluateExpressionArgs = serde_json::from_value(Value::Object(request.arguments.unwrap_or_default()))
+                        .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+                    
+                    let expr_c = CString::new(args.expression)
+                        .map_err(|_| ErrorData::invalid_params("Invalid expression format", None))?;
+                        
+                    let result = run_on_gui_thread(move || {
+                        unsafe { DbgValFromString(expr_c.as_ptr()) }
+                    }).await;
+                    
+                    Ok(CallToolResult::success(vec![Content::text(format!("0x{:X}", result))]))
+                }
+                "Disassemble" => {
+                    let args: DisassembleArgs = serde_json::from_value(Value::Object(request.arguments.unwrap_or_default()))
+                        .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+                    
+                    let start_addr = parse_hex(&args.address)?;
+                    let count = args.count.unwrap_or(1);
+                    
+                    let disasm_list = run_on_gui_thread(move || {
+                        let mut current_addr = start_addr;
+                        let mut results = Vec::new();
+                        
+                        for _ in 0..count {
+                            let mut instr = unsafe { std::mem::zeroed::<DISASM_INSTR>() };
+                            unsafe { DbgDisasmAt(current_addr, &mut instr) };
+                            
+                            if instr.instr_size > 0 {
+                                results.push(json!({
+                                    "address": format!("0x{:X}", current_addr),
+                                    "instruction": unsafe { CStr::from_ptr(instr.instruction.as_ptr()).to_string_lossy().into_owned() },
+                                    "size": instr.instr_size
+                                }));
+                                current_addr += instr.instr_size as usize;
+                            } else {
+                                break;
+                            }
+                        }
+                        results
+                    }).await;
+                    
+                    let json_str = serde_json::to_string_pretty(&disasm_list)
+                        .map_err(|e| ErrorData::internal_error(e.to_string()))?;
+                    Ok(CallToolResult::success(vec![Content::text(json_str)]))
                 }
                 "GetRegisters" => {
                     let result = run_on_gui_thread(|| {
