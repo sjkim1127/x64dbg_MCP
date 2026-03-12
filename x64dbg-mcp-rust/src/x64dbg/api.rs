@@ -144,3 +144,100 @@ pub fn set_label_at_api(addr: duint, text: &str) -> bool {
         false
     }
 }
+
+pub fn get_symbols_api(module_name: &str) -> Vec<serde_json::Value> {
+    let base = if module_name == "*" {
+        0
+    } else {
+        let mod_c = CString::new(module_name).unwrap();
+        unsafe { DbgModBaseFromName(mod_c.as_ptr()) }
+    };
+
+    if base == 0 && module_name != "*" {
+        return Vec::new();
+    }
+
+    let mut symbols = Vec::new();
+
+    extern "C" fn cb_symbol_enum(symbol: *const SYMBOLPTR, user: *mut c_void) -> bool {
+        let symbols = unsafe { &mut *(user as *mut Vec<serde_json::Value>) };
+        let mut info = unsafe { std::mem::zeroed::<SYMBOLINFO>() };
+        unsafe { DbgGetSymbolInfo(symbol, &mut info) };
+
+        let decorated = if info.decoratedSymbol.is_null() {
+            String::new()
+        } else {
+            unsafe { CStr::from_ptr(info.decoratedSymbol).to_string_lossy().into_owned() }
+        };
+
+        symbols.push(serde_json::json!({
+            "address": format!("0x{:X}", info.addr),
+            "name": decorated,
+            "type": info.type_,
+            "ordinal": info.ordinal
+        }));
+
+        if info.freeDecorated {
+            unsafe { BridgeFree(info.decoratedSymbol as *mut c_void) };
+        }
+        if info.freeUndecorated {
+            unsafe { BridgeFree(info.undecoratedSymbol as *mut c_void) };
+        }
+
+        true
+    }
+
+    unsafe {
+        DbgSymbolEnum(base, Some(cb_symbol_enum), &mut symbols as *mut _ as *mut c_void);
+    }
+
+    symbols
+}
+
+pub fn get_strings_api(module_name: &str) -> Vec<serde_json::Value> {
+    let base = if module_name == "*" {
+        // For simplicity, let's just use current CIP module if '*' is specified but not handled globally
+        let regs = get_registers_api();
+        if let Some(r) = regs {
+            unsafe { (*DbgFunctions()).ModBaseFromAddr.unwrap()(r.regcontext.cip) }
+        } else {
+            0
+        }
+    } else {
+        let mod_c = CString::new(module_name).unwrap();
+        unsafe { DbgModBaseFromName(mod_c.as_ptr()) }
+    };
+
+    if base == 0 {
+        return Vec::new();
+    }
+
+    // Get module size
+    let mut size: duint = 0;
+    unsafe { size = (*DbgFunctions()).ModSizeFromAddr.unwrap()(base); }
+    if size == 0 { return Vec::new(); }
+
+    let mut strings = Vec::new();
+    let chunk_size = 0x1000;
+    
+    // We iterate through the module memory and look for string references
+    // This is a simplified version of what 'strref' does.
+    // In x64dbg, DbgGetStringAt is often used to check if an address points to a string.
+    
+    for addr in (base..base + size).step_by(8) { // Step by pointer size for speed
+        let mut string_buf = vec![0i8; 512];
+        if unsafe { DbgGetStringAt(addr, string_buf.as_mut_ptr()) } {
+            let string_val = unsafe { CStr::from_ptr(string_buf.as_ptr()).to_string_lossy().into_owned() };
+            if !string_val.trim().is_empty() {
+                strings.push(serde_json::json!({
+                    "address": format!("0x{:X}", addr),
+                    "content": string_val
+                }));
+            }
+        }
+        // Limit to 1000 strings to prevent overwhelming the AI
+        if strings.len() >= 1000 { break; }
+    }
+
+    strings
+}

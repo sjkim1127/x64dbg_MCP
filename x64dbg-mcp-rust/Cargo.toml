@@ -19,6 +19,7 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 schemars = "1.2.1"
 once_cell = "1.21.3"
 boreal = "1.1.0"
+rhai = "1.19.0"
 
 [build-dependencies]
 bindgen = "0.69.4"

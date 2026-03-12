@@ -257,11 +257,29 @@ pub async fn handle_yara_scan_mem(request: CallToolRequestParams) -> Result<Call
                 }
             }
             Err(e) => {
-                Ok(CallToolResult::success(vec![Content::text(format!("YARA Rule compilation failed: {:?}", e))]))
+                Ok(CallToolResult::success(vec![Content::text(format!("Rule compilation failed: {:?}", e))]))
             }
         }
     } else {
-        Ok(CallToolResult::success(vec![Content::text("Failed to read memory for YARA scan")]))
+        Err(ErrorData::internal_error("Failed to read memory for YARA scan", None))
+    }
+}
+
+pub async fn handle_analyze_function(request: CallToolRequestParams) -> Result<CallToolResult, ErrorData> {
+    let args: AnalyzeFunctionArgs = serde_json::from_value(Value::Object(request.arguments.unwrap_or_default()))
+        .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+    
+    let addr = parse_hex(&args.address)?;
+    
+    match dispatch_dbg_request(DbgRequest::AnalyzeFunction(addr)).await? {
+        DbgResponse::FunctionAnalysis(Some(result)) => {
+            let json_res = serde_json::to_string_pretty(&result).unwrap();
+            Ok(CallToolResult::success(vec![Content::text(json_res)]))
+        }
+        DbgResponse::FunctionAnalysis(None) => {
+            Ok(CallToolResult::success(vec![Content::text("Failed to analyze function at the given address.")]))
+        }
+        _ => Err(ErrorData::internal_error("Unexpected response value", None))
     }
 }
 
@@ -351,5 +369,36 @@ fn parse_value(data: &[u8], t: &str) -> serde_json::Value {
             serde_json::json!(i64::from_le_bytes(b))
         },
         _ => serde_json::Value::Null,
+    }
+}
+
+pub async fn handle_get_symbols(request: CallToolRequestParams) -> Result<CallToolResult, ErrorData> {
+    let args: SymbolStringArgs = serde_json::from_value(Value::Object(request.arguments.unwrap_or_default()))
+        .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+    
+    match dispatch_dbg_request(DbgRequest::GetSymbols(args.module)).await? {
+        DbgResponse::Symbols(json) => Ok(CallToolResult::success(vec![Content::text(json)])),
+        _ => Err(ErrorData::internal_error("Unexpected response value", None))
+    }
+}
+
+pub async fn handle_get_strings(request: CallToolRequestParams) -> Result<CallToolResult, ErrorData> {
+    let args: SymbolStringArgs = serde_json::from_value(Value::Object(request.arguments.unwrap_or_default()))
+        .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+    
+    match dispatch_dbg_request(DbgRequest::GetStrings(args.module)).await? {
+        DbgResponse::Strings(json) => Ok(CallToolResult::success(vec![Content::text(json)])),
+        _ => Err(ErrorData::internal_error("Unexpected response value", None))
+    }
+}
+
+pub async fn handle_execute_script(request: CallToolRequestParams) -> Result<CallToolResult, ErrorData> {
+    let args: ExecuteScriptArgs = serde_json::from_value(Value::Object(request.arguments.unwrap_or_default()))
+        .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+    
+    match dispatch_dbg_request(DbgRequest::ExecuteScript(args.script)).await? {
+        DbgResponse::ScriptResult(Ok(res)) => Ok(CallToolResult::success(vec![Content::text(format!("Script returned: {}", res))])),
+        DbgResponse::ScriptResult(Err(e)) => Ok(CallToolResult::error(vec![Content::text(format!("Script failed: {}", e))])),
+        _ => Err(ErrorData::internal_error("Unexpected response value", None))
     }
 }

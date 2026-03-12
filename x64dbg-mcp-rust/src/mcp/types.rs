@@ -1,4 +1,5 @@
 use serde::Deserialize;
+use crate::x64dbg::duint;
 
 #[derive(Debug, Deserialize)]
 pub struct ExecuteCommandArgs {
@@ -35,6 +36,16 @@ pub struct YaraScanMemArgs {
     pub rule: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct SymbolStringArgs {
+    pub module: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ExecuteScriptArgs {
+    pub script: String,
+}
+
 #[derive(Debug, Deserialize, Clone)]
 pub struct StructFieldDef {
     pub name: String,
@@ -46,4 +57,47 @@ pub struct StructFieldDef {
 pub struct StructDumpMemArgs {
     pub address: String,
     pub fields: Vec<StructFieldDef>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AnalyzeFunctionArgs {
+    pub address: String, // hex string
+}
+
+use serde::Serialize;
+
+#[derive(Debug, Serialize)]
+pub struct AnalyzeFunctionResult {
+    pub start: String,
+    pub end: String,
+    pub entry_point: String,
+    pub nodes: Vec<CFGNode>,
+    pub xrefs: Vec<XRefInfo>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct XRefInfo {
+    pub address: String,
+    pub from: String,
+    pub type_name: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CFGNode {
+    pub start: String,
+    pub end: String,
+    pub brtrue: String,
+    pub brfalse: String,
+    pub instruction_count: duint,
+    pub is_terminal: bool,
+    pub is_split: bool,
+    pub has_indirect_call: bool,
+    pub instructions: Vec<CFGInstruction>,
+    pub exits: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct CFGInstruction {
+    pub address: String,
+    pub bytes: String,
 }

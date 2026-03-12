@@ -2,6 +2,7 @@ use crossbeam_channel::{unbounded, Receiver, Sender};
 use once_cell::sync::Lazy;
 use std::os::raw::c_void;
 use tokio::sync::oneshot;
+use rhai::Engine;
 
 use crate::x64dbg::api::*;
 use crate::mcp::types::*;
@@ -19,6 +20,10 @@ pub enum DbgRequest {
     SetComment { address: usize, text: String },
     SetLabel { address: usize, text: String },
     MemoryIsValidPtr(usize),
+    AnalyzeFunction(usize),
+    GetSymbols(String), // module name
+    GetStrings(String), // module name
+    ExecuteScript(String), // Rhai script content
 }
 
 pub enum DbgResponse {
@@ -30,6 +35,11 @@ pub enum DbgResponse {
     Modules(String),
     CallStack(String),
     Boolean(bool),
+    FunctionAnalysis(Option<AnalyzeFunctionResult>),
+    ScriptResult(Result<String, String>),
+    // We will return JSON strings for symbols and strings to keep it simple over the channel
+    Symbols(String),
+    Strings(String),
 }
 
 pub struct McpTask {
@@ -131,6 +141,197 @@ pub extern "C" fn drain_task_queue_callback(_userdata: *mut c_void) {
             DbgRequest::MemoryIsValidPtr(address) => {
                 let is_valid = read_memory_api(address, 1).is_some();
                 DbgResponse::Boolean(is_valid)
+            }
+            DbgRequest::AnalyzeFunction(entry) => {
+                let mut f_start: duint = 0;
+                let mut f_end: duint = 0;
+                let boundary_success = unsafe { DbgFunctionGet(entry as duint, &mut f_start, &mut f_end) };
+
+                let mut graph = unsafe { std::mem::zeroed::<BridgeCFGraphList>() };
+                let success = unsafe { DbgAnalyzeFunction(entry as duint, &mut graph) };
+                
+                if success {
+                    let mut nodes = Vec::new();
+                    let node_ptr = graph.nodes.data as *const BridgeCFNodeList;
+                    let node_count = graph.nodes.count as usize;
+                    
+                    let mut xrefs = Vec::new();
+                    for i in 0..node_count {
+                        let node = unsafe { &*node_ptr.add(i) };
+                        
+                        let mut instructions = Vec::new();
+                        let instr_ptr = node.instrs.data as *const BridgeCFInstruction;
+                        let instr_count = node.instrs.count as usize;
+                        for j in 0..instr_count {
+                            let instr = unsafe { &*instr_ptr.add(j) };
+                            
+                            // Try to get string reference at this instruction
+                            use std::ffi::CStr;
+                            let mut string_buf = vec![0i8; 512];
+                            if unsafe { DbgGetStringAt(instr.addr, string_buf.as_mut_ptr()) } {
+                                let string_val = unsafe { CStr::from_ptr(string_buf.as_ptr()).to_string_lossy().into_owned() };
+                                if !string_val.is_empty() {
+                                    xrefs.push(XRefInfo {
+                                        address: format!("0x{:X}", instr.addr),
+                                        from: format!("0x{:X}", instr.addr),
+                                        type_name: format!("STRING: {}", string_val),
+                                    });
+                                }
+                            }
+
+                            instructions.push(CFGInstruction {
+                                address: format!("0x{:X}", instr.addr),
+                                bytes: instr.data.iter().map(|b| format!("{:02X}", b)).collect::<Vec<String>>().join(""),
+                            });
+                        }
+                        
+                        let mut exits = Vec::new();
+                        let exit_ptr = node.exits.data as *const duint;
+                        let exit_count = node.exits.count as usize;
+                        for k in 0..exit_count {
+                            let exit_addr = unsafe { *exit_ptr.add(k) };
+                            exits.push(format!("0x{:X}", exit_addr));
+                        }
+                        
+                        nodes.push(CFGNode {
+                            start: format!("0x{:X}", node.start),
+                            end: format!("0x{:X}", node.end),
+                            brtrue: format!("0x{:X}", node.brtrue),
+                            brfalse: format!("0x{:X}", node.brfalse),
+                            instruction_count: node.icount,
+                            is_terminal: node.terminal,
+                            is_split: node.split,
+                            has_indirect_call: node.indirectcall,
+                            instructions,
+                            exits,
+                        });
+                    }
+                    
+                    // Cleanup
+                    for i in 0..node_count {
+                        let node = unsafe { &*node_ptr.add(i) };
+                        unsafe {
+                            if !node.exits.data.is_null() { BridgeFree(node.exits.data); }
+                            if !node.instrs.data.is_null() { BridgeFree(node.instrs.data); }
+                        }
+                    }
+                    unsafe {
+                        if !graph.nodes.data.is_null() { BridgeFree(graph.nodes.data); }
+                    }
+
+                    DbgResponse::FunctionAnalysis(Some(AnalyzeFunctionResult {
+                        start: format!("0x{:X}", if boundary_success { f_start } else { entry as duint }),
+                        end: format!("0x{:X}", if boundary_success { f_end } else { 0 }),
+                        entry_point: format!("0x{:X}", graph.entryPoint),
+                        nodes,
+                        xrefs,
+                    }))
+                } else {
+                    DbgResponse::FunctionAnalysis(None)
+                }
+            }
+            DbgRequest::GetSymbols(module) => {
+                let symbols = get_symbols_api(&module);
+                DbgResponse::Symbols(serde_json::to_string(&symbols).unwrap_or_else(|_| "[]".to_string()))
+            }
+            DbgRequest::GetStrings(module) => {
+                let strings = get_strings_api(&module);
+                DbgResponse::Strings(serde_json::to_string(&strings).unwrap_or_else(|_| "[]".to_string()))
+            }
+            DbgRequest::ExecuteScript(script) => {
+                let mut engine = Engine::new();
+                
+                // Helper to convert serde_json to Rhai Dynamic
+                fn json_to_rhai(v: serde_json::Value) -> rhai::Dynamic {
+                    match v {
+                        serde_json::Value::Null => rhai::Dynamic::UNIT,
+                        serde_json::Value::Bool(b) => b.into(),
+                        serde_json::Value::Number(n) => {
+                            if let Some(i) = n.as_i64() { i.into() }
+                            else if let Some(f) = n.as_f64() { f.into() }
+                            else { rhai::Dynamic::UNIT }
+                        },
+                        serde_json::Value::String(s) => s.into(),
+                        serde_json::Value::Array(a) => {
+                            let arr: rhai::Array = a.into_iter().map(json_to_rhai).collect();
+                            arr.into()
+                        },
+                        serde_json::Value::Object(o) => {
+                            let mut map = rhai::Map::new();
+                            for (k, v) in o {
+                                map.insert(k.into(), json_to_rhai(v));
+                            }
+                            map.into()
+                        }
+                    }
+                }
+
+                // Register x64dbg APIs to Rhai
+                engine.register_fn("execute_command", |cmd: &str| -> bool {
+                    execute_command_api(cmd)
+                });
+                engine.register_fn("log_print", |msg: &str| {
+                    log_print(msg);
+                });
+                engine.register_fn("read_memory", |addr: i64, size: i64| -> rhai::Array {
+                    if let Some(data) = read_memory_api(addr as duint, size as usize) {
+                        data.into_iter().map(|b| (b as i64).into()).collect()
+                    } else {
+                        rhai::Array::new()
+                    }
+                });
+                engine.register_fn("get_registers", || -> rhai::Map {
+                    if let Some(reg_dump) = get_registers_api() {
+                        let mut map = rhai::Map::new();
+                        let regs = &reg_dump.regcontext;
+                        map.insert("rax".into(), (regs.cax as i64).into());
+                        map.insert("rbx".into(), (regs.cbx as i64).into());
+                        map.insert("rcx".into(), (regs.ccx as i64).into());
+                        map.insert("rdx".into(), (regs.cdx as i64).into());
+                        map.insert("rsi".into(), (regs.csi as i64).into());
+                        map.insert("rdi".into(), (regs.cdi as i64).into());
+                        map.insert("rbp".into(), (regs.cbp as i64).into());
+                        map.insert("rsp".into(), (regs.csp as i64).into());
+                        map.insert("rip".into(), (regs.cip as i64).into());
+                        map
+                    } else {
+                        rhai::Map::new()
+                    }
+                });
+
+                engine.register_fn("get_breakpoints", || -> rhai::Array {
+                    let v = serde_json::to_value(get_breakpoints_api()).unwrap_or(serde_json::Value::Array(vec![]));
+                    if let rhai::Dynamic::Array(a) = json_to_rhai(v) { a } else { rhai::Array::new() }
+                });
+                engine.register_fn("get_modules", || -> rhai::Array {
+                    let v = serde_json::to_value(get_modules_api()).unwrap_or(serde_json::Value::Array(vec![]));
+                    if let rhai::Dynamic::Array(a) = json_to_rhai(v) { a } else { rhai::Array::new() }
+                });
+                engine.register_fn("get_threads", || -> rhai::Array {
+                    let v = serde_json::to_value(get_threads_api()).unwrap_or(serde_json::Value::Array(vec![]));
+                    if let rhai::Dynamic::Array(a) = json_to_rhai(v) { a } else { rhai::Array::new() }
+                });
+                engine.register_fn("get_call_stack", || -> rhai::Array {
+                    let v = serde_json::to_value(get_call_stack_api()).unwrap_or(serde_json::Value::Array(vec![]));
+                    if let rhai::Dynamic::Array(a) = json_to_rhai(v) { a } else { rhai::Array::new() }
+                });
+                engine.register_fn("get_symbols", |module: &str| -> rhai::Array {
+                    let v = serde_json::to_value(get_symbols_api(module)).unwrap_or(serde_json::Value::Array(vec![]));
+                    if let rhai::Dynamic::Array(a) = json_to_rhai(v) { a } else { rhai::Array::new() }
+                });
+                engine.register_fn("get_strings", |module: &str| -> rhai::Array {
+                    let v = serde_json::to_value(get_strings_api(module)).unwrap_or(serde_json::Value::Array(vec![]));
+                    if let rhai::Dynamic::Array(a) = json_to_rhai(v) { a } else { rhai::Array::new() }
+                });
+                
+                // Execute the script
+                match engine.eval::<rhai::Dynamic>(&script) {
+                    Ok(result) => {
+                        let result_str = format!("{:?}", result);
+                        DbgResponse::ScriptResult(Ok(result_str))
+                    },
+                    Err(e) => DbgResponse::ScriptResult(Err(e.to_string())),
+                }
             }
         };
 

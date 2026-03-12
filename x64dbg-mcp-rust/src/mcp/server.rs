@@ -282,9 +282,20 @@ impl ServerHandler for X64DbgMcpServer {
                             "properties": {
                                 "start": { "type": "string", "description": "Start address in hex (e.g., '0x401000')" },
                                 "size": { "type": "string", "description": "Size to read and scan in hex (e.g., '0x1000')" },
-                                "rule": { "type": "string", "description": "The raw YARA rule string text" }
+                                "rule": { "type": "string", "description": "YARA rules string" }
                             },
                             "required": ["start", "size", "rule"]
+                        }))),
+                    ),
+                    Tool::new(
+                        "AnalyzeFunction",
+                        "Analyze function at address to retrieve Control Flow Graph (CFG) nodes and instructions.",
+                        Arc::new(to_json_object(json!({
+                            "type": "object",
+                            "properties": {
+                                "address": { "type": "string", "description": "Hex address of the function entry point" }
+                            },
+                            "required": ["address"]
                         }))),
                     ),
                     Tool::new(
@@ -319,6 +330,37 @@ impl ServerHandler for X64DbgMcpServer {
                                 "expression": { "type": "string", "description": "Expression string" }
                             },
                             "required": ["expression"]
+                        })))
+                    ),
+                    Tool::new(
+                        "GetSymbols",
+                        "Extract all function, import, and export symbols from a loaded module. Not fully implemented via native struct yet, but acts as a placeholder.",
+                        Arc::new(to_json_object(json!({
+                            "type": "object",
+                            "properties": {
+                                "module": { "type": "string", "description": "Module name or '*' for all modules" }
+                            },
+                        })))
+                    ),
+                    Tool::new(
+                        "GetStrings",
+                        "Extract string references from a loaded module.",
+                        Arc::new(to_json_object(json!({
+                            "type": "object",
+                            "properties": {
+                                "module": { "type": "string", "description": "Module name or '*' for all modules" }
+                            },
+                        })))
+                    ),
+                    Tool::new(
+                        "ExecuteScript",
+                        "Execute a Rhai script in the x64dbg GUI thread for quick internal automated actions.",
+                        Arc::new(to_json_object(json!({
+                            "type": "object",
+                            "properties": {
+                                "script": { "type": "string", "description": "Rhai script code" }
+                            },
+                            "required": ["script"]
                         })))
                     )
                 ],
@@ -358,7 +400,11 @@ impl ServerHandler for X64DbgMcpServer {
                 "MiscParseExpression" => handle_misc_parse_expression(request).await,
                 "Misc_ParseExpression" => tools::handle_misc_parse_expression(request).await,
                 "YaraScanMem" => tools::handle_yara_scan_mem(request).await,
+                "AnalyzeFunction" => tools::handle_analyze_function(request).await,
                 "StructDumpMem" => tools::handle_struct_dump_mem(request).await,
+                "GetSymbols" => tools::handle_get_symbols(request).await,
+                "GetStrings" => tools::handle_get_strings(request).await,
+                "ExecuteScript" => tools::handle_execute_script(request).await,
                 _ => Err(ErrorData::invalid_params(
                     format!("Unknown tool: {}", request.name),
                     None,
