@@ -19,9 +19,10 @@ use rmcp::{
         streamable_http_server::session::local::LocalSessionManager,
     },
 };
-use serde::{Deserialize};
+use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashSet;
+use schemars::JsonSchema;
 
 // Include the generated bindings
 include!(concat!(env!("OUT_DIR"), "/bindings.rs"));
@@ -72,6 +73,13 @@ fn log_print(msg: &str) {
 
 #[derive(Clone)]
 struct X64DbgMcpServer;
+
+#[derive(Debug, Serialize, Deserialize, JsonSchema)]
+struct ConfirmInput {
+    #[schemars(description = "Do you confirm this action? (yes/no)")]
+    confirm: String,
+}
+rmcp::elicit_safe!(ConfirmInput);
 
 #[derive(Debug, Deserialize)]
 struct ExecuteCommandArgs {
@@ -743,6 +751,26 @@ impl ServerHandler for X64DbgMcpServer {
                     let args: SetRegisterArgs = serde_json::from_value(Value::Object(request.arguments.unwrap_or_default()))
                         .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
                     
+                    // Ask user for confirmation via UI popup
+                    let confirm_msg = format!("Do you want to change register {} to {}?", args.register, args.value);
+                    let result = cx.peer.elicit::<ConfirmInput>(confirm_msg).await;
+                    
+                    match result {
+                        Ok(Some(input)) => {
+                            if input.confirm.to_lowercase() != "yes" && input.confirm.to_lowercase() != "y" {
+                                return Ok(CallToolResult::success(vec![Content::text("Action cancelled by user.")]));
+                            }
+                        }
+                        Ok(None) => return Ok(CallToolResult::error(vec![Content::text("No confirmation provided.")])),
+                        Err(rmcp::service::ElicitationError::UserDeclined) => return Ok(CallToolResult::success(vec![Content::text("User explicitly declined.")])),
+                        Err(rmcp::service::ElicitationError::UserCancelled) => return Ok(CallToolResult::success(vec![Content::text("User cancelled the request.")])),
+                        Err(rmcp::service::ElicitationError::CapabilityNotSupported) => {
+                            log_print("Elicitation not supported by client, proceeding automatically...\n");
+                            // Fallback to proceed if not supported by client
+                        }
+                        Err(e) => return Err(ErrorData::internal_error(format!("Elicitation failed: {}", e))),
+                    }
+
                     let cmd = format!("{}={}", args.register, args.value);
                     let cmd_c = CString::new(cmd)
                         .map_err(|_| ErrorData::invalid_params("Invalid register or value format", None))?;
