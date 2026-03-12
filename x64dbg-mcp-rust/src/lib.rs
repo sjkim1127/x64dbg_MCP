@@ -146,6 +146,10 @@ impl ServerHandler for X64DbgMcpServer {
             Ok(InitializeResult::new(
                 ServerCapabilities::builder()
                     .enable_tools()
+                    .resources(ResourceCapabilities {
+                        subscribe: Some(false),
+                        list_changed: Some(false),
+                    })
                     .build(),
             )
             .with_server_info(Implementation::new("x64dbg-rust-mcp", "0.1.0")))
@@ -157,6 +161,143 @@ impl ServerHandler for X64DbgMcpServer {
         _cx: RequestContext<RoleServer>,
     ) -> impl Future<Output = Result<(), ErrorData>> + Send + '_ {
         async move { Ok(()) }
+    }
+
+    fn list_resources(
+        &self,
+        _request: Option<PaginatedRequestParams>,
+        _cx: RequestContext<RoleServer>,
+    ) -> impl Future<Output = Result<ListResourcesResult, ErrorData>> + Send + '_ {
+        async move {
+            Ok(ListResourcesResult {
+                resources: vec![
+                    Resource::new(
+                        "debug://modules",
+                        "Loaded Modules",
+                    ).with_description("List of all currently loaded modules in the process")
+                     .with_mime_type("application/json"),
+                    Resource::new(
+                        "debug://threads",
+                        "Thread List",
+                    ).with_description("List of all active threads in the process")
+                     .with_mime_type("application/json"),
+                    Resource::new(
+                        "debug://registers",
+                        "Current Registers",
+                    ).with_description("Current state of general-purpose CPU registers")
+                     .with_mime_type("application/json"),
+                ],
+                next_cursor: None,
+                meta: None,
+            })
+        }
+    }
+
+    fn read_resource(
+        &self,
+        request: ReadResourceRequestParams,
+        _cx: RequestContext<RoleServer>,
+    ) -> impl Future<Output = Result<ReadResourceResult, ErrorData>> + Send + '_ {
+        async move {
+            let uri = request.uri.as_str();
+            
+            let content = match uri {
+                "debug://modules" => {
+                    let mlist = run_on_gui_thread(|| {
+                        let mut mem_map = unsafe { std::mem::zeroed::<MEMMAP>() };
+                        let success = unsafe { DbgMemMap(&mut mem_map) };
+                        
+                        let mut mlist = Vec::new();
+                        let mut seen_bases = HashSet::new();
+                        
+                        if success && mem_map.count > 0 && !mem_map.page.is_null() {
+                            for i in 0..mem_map.count {
+                                let page = unsafe { *mem_map.page.add(i as usize) };
+                                let base = page.mbi.AllocationBase as usize;
+                                if page.mbi.Type == MEM_IMAGE && !seen_bases.contains(&base) {
+                                    let name = unsafe { CStr::from_ptr(page.info.as_ptr()).to_string_lossy().into_owned() };
+                                    if !name.is_empty() {
+                                        mlist.push(json!({
+                                            "base": format!("0x{:X}", base),
+                                            "name": name
+                                        }));
+                                        seen_bases.insert(base);
+                                    }
+                                }
+                            }
+                            unsafe { BridgeFree(mem_map.page as *mut c_void) };
+                        }
+                        mlist
+                    }).await;
+                    serde_json::to_string_pretty(&mlist).unwrap_or_else(|_| "[]".to_string())
+                },
+                "debug://threads" => {
+                    let tlist = run_on_gui_thread(|| {
+                        let mut thread_list = unsafe { std::mem::zeroed::<THREADLIST>() };
+                        unsafe { DbgGetThreadList(&mut thread_list) };
+                        
+                        let mut tlist = Vec::new();
+                        if thread_list.count > 0 && !thread_list.list.is_null() {
+                            for i in 0..thread_list.count {
+                                let t = unsafe { *thread_list.list.add(i as usize) };
+                                tlist.push(json!({
+                                    "id": t.BasicInfo.ThreadId,
+                                    "address": format!("0x{:X}", t.BasicInfo.ThreadStartAddress),
+                                    "name": unsafe { CStr::from_ptr(t.BasicInfo.threadName.as_ptr()).to_string_lossy().into_owned() }
+                                }));
+                            }
+                            unsafe { BridgeFree(thread_list.list as *mut c_void) };
+                        }
+                        tlist
+                    }).await;
+                    serde_json::to_string_pretty(&tlist).unwrap_or_else(|_| "[]".to_string())
+                },
+                "debug://registers" => {
+                    let reg_json = run_on_gui_thread(|| {
+                        let mut reg_dump = unsafe { std::mem::zeroed::<REGDUMP_AVX512>() };
+                        let success = unsafe { DbgGetRegDumpEx(&mut reg_dump, std::mem::size_of::<REGDUMP_AVX512>()) };
+                        
+                        if success {
+                            let regs = &reg_dump.regcontext;
+                            let mut reg_map = serde_json::Map::new();
+                            
+                            reg_map.insert("rax".into(), json!(format!("0x{:X}", regs.cax)));
+                            reg_map.insert("rbx".into(), json!(format!("0x{:X}", regs.cbx)));
+                            reg_map.insert("rcx".into(), json!(format!("0x{:X}", regs.ccx)));
+                            reg_map.insert("rdx".into(), json!(format!("0x{:X}", regs.cdx)));
+                            reg_map.insert("rsi".into(), json!(format!("0x{:X}", regs.csi)));
+                            reg_map.insert("rdi".into(), json!(format!("0x{:X}", regs.cdi)));
+                            reg_map.insert("rbp".into(), json!(format!("0x{:X}", regs.cbp)));
+                            reg_map.insert("rsp".into(), json!(format!("0x{:X}", regs.csp)));
+                            reg_map.insert("rip".into(), json!(format!("0x{:X}", regs.cip)));
+                            reg_map.insert("eflags".into(), json!(format!("0x{:X}", regs.eflags)));
+
+                            #[cfg(target_pointer_width = "64")]
+                            {
+                                reg_map.insert("r8".into(), json!(format!("0x{:X}", regs.r8)));
+                                reg_map.insert("r9".into(), json!(format!("0x{:X}", regs.r9)));
+                                reg_map.insert("r10".into(), json!(format!("0x{:X}", regs.r10)));
+                                reg_map.insert("r11".into(), json!(format!("0x{:X}", regs.r11)));
+                                reg_map.insert("r12".into(), json!(format!("0x{:X}", regs.r12)));
+                                reg_map.insert("r13".into(), json!(format!("0x{:X}", regs.r13)));
+                                reg_map.insert("r14".into(), json!(format!("0x{:X}", regs.r14)));
+                                reg_map.insert("r15".into(), json!(format!("0x{:X}", regs.r15)));
+                            }
+                            serde_json::to_string_pretty(&reg_map).unwrap_or_else(|_| "{}".to_string())
+                        } else {
+                            "{\"error\": \"Debugger not running or paused\"}".to_string()
+                        }
+                    }).await;
+                    reg_json
+                },
+                _ => return Err(ErrorData::invalid_params(format!("Resource not found: {}", uri), None)),
+            };
+
+            Ok(ReadResourceResult {
+                contents: vec![ResourceContents::text(content, uri).with_mime_type("application/json")],
+                meta: None,
+            })
+        }
     }
 
     fn list_tools(
