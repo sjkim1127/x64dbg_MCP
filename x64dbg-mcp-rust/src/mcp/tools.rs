@@ -1,7 +1,7 @@
 use crate::mcp::types::*;
 use crate::x64dbg::api::*;
 use rmcp::{model::*, ErrorData};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use crate::mcp::concurrency::{
     drain_task_queue_callback, DbgRequest, DbgResponse, McpTask, TASK_TX,
@@ -29,7 +29,10 @@ async fn dispatch_dbg_request(request: DbgRequest) -> Result<DbgResponse, ErrorD
 
     // Wake up x64dbg main thread to process the queue
     unsafe {
-        crate::x64dbg::GuiExecuteOnGuiThreadEx(drain_task_queue_callback, std::ptr::null_mut());
+        crate::x64dbg::GuiExecuteOnGuiThreadEx(
+            Some(drain_task_queue_callback),
+            std::ptr::null_mut(),
+        );
     }
 
     resp_rx

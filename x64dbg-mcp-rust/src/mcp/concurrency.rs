@@ -6,11 +6,9 @@ use std::sync::OnceLock;
 use tokio::sync::oneshot;
 
 use crate::mcp::types::*;
-use crate::x64dbg;
 use crate::x64dbg::api::*;
 use crate::x64dbg::{
-    duint, BridgeCFGraphList, BridgeCFInstruction, BridgeCFNodeList, BridgeFree,
-    DbgAnalyzeFunction, DbgFunctionGet, DbgGetStringAt,
+    duint, BridgeCFGraphList, BridgeFree, DbgAnalyzeFunction, DbgFunctionGet, DbgGetStringAt,
 };
 
 pub enum DbgRequest {
@@ -116,7 +114,7 @@ pub extern "C" fn drain_task_queue_callback(_userdata: *mut c_void) {
                 DbgResponse::CommandSuccess(result)
             }
             DbgRequest::ReadMemory { address, size } => {
-                let data = read_memory_api(address, size);
+                let data = read_memory_api(address as duint, size);
                 DbgResponse::MemoryData(data)
             }
             DbgRequest::GetRegisters => {
@@ -176,15 +174,15 @@ pub extern "C" fn drain_task_queue_callback(_userdata: *mut c_void) {
             DbgRequest::GetModules => DbgResponse::Modules(get_modules_api()),
             DbgRequest::GetCallStack => DbgResponse::CallStack(get_call_stack_api()),
             DbgRequest::SetComment { address, text } => {
-                let result = set_comment_at_api(address, &text);
-                DbgResponse::CommandSuccess(result)
+                let result = set_comment_at_api(address as duint, &text);
+                DbgResponse::Boolean(result)
             }
             DbgRequest::SetLabel { address, text } => {
-                let result = set_label_at_api(address, &text);
-                DbgResponse::CommandSuccess(result)
+                let result = set_label_at_api(address as duint, &text);
+                DbgResponse::Boolean(result)
             }
             DbgRequest::MemoryIsValidPtr(address) => {
-                let is_valid = read_memory_api(address, 1).is_some();
+                let is_valid = read_memory_api(address as duint, 1).is_some();
                 DbgResponse::Boolean(is_valid)
             }
             DbgRequest::AnalyzeFunction(entry) => {
@@ -389,7 +387,8 @@ static RHAI_ENGINE: Lazy<Engine> = Lazy::new(|| {
     engine.register_fn("get_breakpoints", || -> Array {
         let v =
             serde_json::to_value(get_breakpoints_api()).unwrap_or(serde_json::Value::Array(vec![]));
-        if let Dynamic::Array(a) = json_to_rhai(v) {
+        if json_to_rhai(v).is_array() {
+            let a = json_to_rhai(v).into_array().unwrap();
             a
         } else {
             Array::new()
@@ -397,7 +396,8 @@ static RHAI_ENGINE: Lazy<Engine> = Lazy::new(|| {
     });
     engine.register_fn("get_modules", || -> Array {
         let v = serde_json::to_value(get_modules_api()).unwrap_or(serde_json::Value::Array(vec![]));
-        if let Dynamic::Array(a) = json_to_rhai(v) {
+        if json_to_rhai(v).is_array() {
+            let a = json_to_rhai(v).into_array().unwrap();
             a
         } else {
             Array::new()
@@ -405,7 +405,8 @@ static RHAI_ENGINE: Lazy<Engine> = Lazy::new(|| {
     });
     engine.register_fn("get_threads", || -> Array {
         let v = serde_json::to_value(get_threads_api()).unwrap_or(serde_json::Value::Array(vec![]));
-        if let Dynamic::Array(a) = json_to_rhai(v) {
+        if json_to_rhai(v).is_array() {
+            let a = json_to_rhai(v).into_array().unwrap();
             a
         } else {
             Array::new()
@@ -414,7 +415,8 @@ static RHAI_ENGINE: Lazy<Engine> = Lazy::new(|| {
     engine.register_fn("get_call_stack", || -> Array {
         let v =
             serde_json::to_value(get_call_stack_api()).unwrap_or(serde_json::Value::Array(vec![]));
-        if let Dynamic::Array(a) = json_to_rhai(v) {
+        if json_to_rhai(v).is_array() {
+            let a = json_to_rhai(v).into_array().unwrap();
             a
         } else {
             Array::new()
@@ -423,7 +425,8 @@ static RHAI_ENGINE: Lazy<Engine> = Lazy::new(|| {
     engine.register_fn("get_symbols", |module: &str| -> Array {
         let v = serde_json::to_value(get_symbols_api(module))
             .unwrap_or(serde_json::Value::Array(vec![]));
-        if let Dynamic::Array(a) = json_to_rhai(v) {
+        if json_to_rhai(v).is_array() {
+            let a = json_to_rhai(v).into_array().unwrap();
             a
         } else {
             Array::new()

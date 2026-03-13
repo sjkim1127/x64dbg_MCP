@@ -1,6 +1,5 @@
-use rmcp::{model::*, Client, ErrorData};
+use rmcp::model::*;
 use std::sync::Arc;
-use tokio::time::{sleep, Duration};
 
 #[tokio::test]
 async fn test_mcp_server_info() {

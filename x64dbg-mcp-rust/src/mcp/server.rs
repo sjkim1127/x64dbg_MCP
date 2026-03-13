@@ -6,8 +6,9 @@ use rmcp::{
     service::{Peer, RequestContext},
     transport::{
         streamable_http_server::session::local::LocalSessionManager, StreamableHttpServerConfig,
+        StreamableHttpService,
     },
-    ErrorData, Resource, Server, ServerHandler, Tool,
+    ErrorData, Resource, RoleServer, Server, ServerHandler, Tool,
 };
 use serde_json::{json, Value};
 use std::future::Future;
@@ -17,14 +18,14 @@ pub static GLOBAL_PEERS: Lazy<Mutex<Vec<Peer<RoleServer>>>> = Lazy::new(|| Mutex
 
 pub async fn broadcast_event(level: LoggingLevel, data: Value) {
     let peers = if let Ok(mut peers) = GLOBAL_PEERS.lock() {
-        peers.retain(|p| !p.is_transport_closed());
+        peers.retain(|p: &Peer<RoleServer>| !p.is_transport_closed());
         peers.clone()
     } else {
         return;
     };
 
     for peer in peers {
-        let params = LoggingMessageNotificationParams::new(level, data.clone())
+        let params = LoggingMessageNotificationParam::new(level, data.clone())
             .with_logger("x64dbg".to_string());
         let notif_inner = LoggingMessageNotification::new(params);
         let notif = ServerNotification::LoggingMessageNotification(notif_inner);

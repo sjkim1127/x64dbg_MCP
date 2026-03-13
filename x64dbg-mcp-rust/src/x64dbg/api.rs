@@ -1,5 +1,5 @@
 use super::*;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use std::collections::HashSet;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_void};
@@ -29,6 +29,7 @@ pub struct HANDLEINFO {
 }
 
 #[repr(C)]
+#[derive(Clone, Copy)]
 pub struct DBGPATCHINFO {
     pub mod_name: [c_char; 256],
     pub addr: duint,
@@ -90,28 +91,8 @@ pub struct XREF_INFO {
     pub references: *mut XREF_RECORD,
 }
 
-#[repr(C)]
-pub struct DBGFUNCTIONS {
-    pub GetCallStack: Option<extern "C" fn(callstack: *mut DBGCALLSTACK)>,
-    pub GetSEHChain: Option<extern "C" fn(sehchain: *mut c_void)>,
-    pub _padding1: [Option<extern "C" fn()>; 3], // Skip symbol download etc.
-    pub GetProcessList: Option<extern "C" fn(entries: *mut *mut c_void, count: *mut i32)>,
-    pub _padding2: [Option<extern "C" fn()>; 10],
-    pub EnumHandles: Option<extern "C" fn(handles: *mut ListInfo) -> bool>,
-    pub GetHandleName: Option<
-        extern "C" fn(
-            handle: duint,
-            name: *mut c_char,
-            nameSize: usize,
-            typeName: *mut c_char,
-            typeNameSize: usize,
-        ) -> bool,
-    >,
-    pub EnumTcpConnections: Option<extern "C" fn(connections: *mut ListInfo) -> bool>,
-    pub _padding3: [Option<extern "C" fn()>; 7],
-    pub EnumWindows: Option<extern "C" fn(windows: *mut ListInfo) -> bool>,
-    pub EnumHeaps: Option<extern "C" fn(heaps: *mut ListInfo) -> bool>,
-}
+// Use the bindings' DBGFUNCTIONS_ instead of manual definition
+pub use bindings::DBGFUNCTIONS_ as DBGFUNCTIONS;
 
 #[repr(C)]
 pub struct DBGCALLSTACK {
@@ -212,19 +193,19 @@ impl Drop for BridgeMemoryGuard {
 }
 
 // Helper to access DbgFunctions safely
-fn dbg_functions() -> &'static DBGFUNCTIONS {
-    unsafe { &*DbgFunctions() }
+fn dbg_functions() -> &'static bindings::DBGFUNCTIONS_ {
+    unsafe { &*(DbgFunctions() as *const bindings::DBGFUNCTIONS_) }
 }
 
 pub fn get_breakpoints_api() -> Vec<serde_json::Value> {
     // Changed to serde_json::Value to match original return type
     let mut bplist = unsafe { std::mem::zeroed::<BPMAP>() };
-    let count = unsafe { DbgGetBplist(BPXTYPE::bp_none, &mut bplist) }; // Changed to DbgGetBplist and BPXTYPE::bp_none as per instruction
+    let count = unsafe { DbgGetBplist(BPXTYPE_bp_none, &mut bplist) }; // Changed to DbgGetBplist and BPXTYPE_bp_none as per instruction
     let mut breakpoints = Vec::new();
 
-    if count > 0 && !bplist.list.is_null() {
-        let _guard = BridgeMemoryGuard(bplist.list as *mut c_void);
-        let entries = unsafe { std::slice::from_raw_parts(bplist.list, count as usize) };
+    if count > 0 && !bplist.bp.is_null() {
+        let _guard = BridgeMemoryGuard(bplist.bp as *mut c_void);
+        let entries = unsafe { std::slice::from_raw_parts(bplist.bp, count as usize) };
         for entry in entries {
             breakpoints.push(
                 serde_json::json!({ // Changed to serde_json::json! to match original return type
@@ -250,8 +231,8 @@ pub fn get_threads_api() -> Vec<serde_json::Value> {
         for entry in entries {
             threads.push(
                 serde_json::json!({ // Changed to serde_json::json! to match original return type
-                    "handle": format!("0x{:X}", entry.Handle as usize),
-                    "id": entry.ThreadId,
+                    "handle": format!("0x{:X}", entry.BasicInfo.Handle as usize),
+                    "id": entry.BasicInfo.ThreadId,
                     "cip": format!("0x{:X}", entry.ThreadCip),
                     "wait_reason": entry.WaitReason,
                 }),
@@ -295,7 +276,7 @@ pub fn get_modules_api() -> Vec<serde_json::Value> {
 pub fn get_call_stack_api() -> Vec<serde_json::Value> {
     // Changed to serde_json::Value to match original return type
     let mut cs = unsafe { std::mem::zeroed::<DBGCALLSTACK>() };
-    unsafe { dbg_functions().GetCallStack.unwrap()(&mut cs) };
+    unsafe { (dbg_functions().GetCallStack.unwrap())(&mut cs) };
     let mut entries = Vec::new();
 
     if cs.total > 0 && !cs.entries.is_null() {
@@ -346,7 +327,7 @@ pub fn get_symbols_api(module_name: &str) -> Vec<serde_json::Value> {
     extern "C" fn cb_symbol_enum(symbol: *const SYMBOLPTR, user: *mut c_void) -> bool {
         let symbols = unsafe { &mut *(user as *mut Vec<serde_json::Value>) };
         let mut info = unsafe { std::mem::zeroed::<SYMBOLINFO>() };
-        unsafe { DbgGetSymbolInfo(symbol, &mut info) };
+        unsafe { DbgGetSymbolInfo(symbol as *const c_void, &mut info) };
 
         let decorated = if info.decoratedSymbol.is_null() {
             String::new()
@@ -378,7 +359,9 @@ pub fn get_symbols_api(module_name: &str) -> Vec<serde_json::Value> {
     unsafe {
         DbgSymbolEnum(
             base,
-            Some(cb_symbol_enum),
+            Some(std::mem::transmute(
+                cb_symbol_enum as extern "C" fn(*const SYMBOLPTR, *mut c_void) -> bool,
+            )),
             &mut symbols as *mut _ as *mut c_void,
         );
     }
@@ -430,7 +413,7 @@ pub fn get_strings_api(module_name: &str) -> Vec<serde_json::Value> {
                     if end - start >= 4 {
                         if let Ok(content) = std::str::from_utf8(&buffer[start..end]) {
                             strings.push(serde_json::json!({
-                                "address": format!("0x{:X}", current_addr + start as duint), // Cast start to duint
+                                "address": format!("0x{:X}", current_addr + start as u64), // Cast start to duint
                                 "content": content.to_string()
                             }));
                         }
@@ -564,7 +547,7 @@ pub fn get_tcp_connections_api() -> Vec<serde_json::Value> {
         size: 0,
         data: std::ptr::null_mut(),
     };
-    if unsafe { dbg_functions().EnumTcpConnections.unwrap()(&mut connections) } {
+    if unsafe { (dbg_functions().EnumTcpConnections.unwrap())(&mut connections) } {
         let mut result = Vec::new();
         if connections.count > 0 && !connections.data.is_null() {
             let _guard = BridgeMemoryGuard(connections.data);
@@ -594,7 +577,7 @@ pub fn get_handles_api() -> Vec<serde_json::Value> {
         size: 0,
         data: std::ptr::null_mut(),
     };
-    if unsafe { dbg_functions().EnumHandles.unwrap()(&mut handles) } {
+    if unsafe { (dbg_functions().EnumHandles.unwrap())(&mut handles) } {
         let mut result = Vec::new();
         if handles.count > 0 && !handles.data.is_null() {
             let _guard = BridgeMemoryGuard(handles.data);
@@ -607,7 +590,7 @@ pub fn get_handles_api() -> Vec<serde_json::Value> {
                 let mut type_name = String::new();
 
                 if unsafe {
-                    dbg_functions().GetHandleName.unwrap()(
+                    (dbg_functions().GetHandleName.unwrap())(
                         entry.Handle,
                         name_buf.as_mut_ptr(),
                         512,
@@ -647,7 +630,7 @@ pub fn get_heaps_api() -> Vec<serde_json::Value> {
         size: 0,
         data: std::ptr::null_mut(),
     };
-    if unsafe { dbg_functions().EnumHeaps.unwrap()(&mut heaps) } {
+    if unsafe { (dbg_functions().EnumHeaps.unwrap())(&mut heaps) } {
         let mut result = Vec::new();
         if heaps.count > 0 && !heaps.data.is_null() {
             let _guard = BridgeMemoryGuard(heaps.data);
@@ -673,7 +656,7 @@ pub fn get_windows_api() -> Vec<serde_json::Value> {
         size: 0,
         data: std::ptr::null_mut(),
     };
-    if unsafe { dbg_functions().EnumWindows.unwrap()(&mut windows) } {
+    if unsafe { (dbg_functions().EnumWindows.unwrap())(&mut windows) } {
         let mut result = Vec::new();
         if windows.count > 0 && !windows.data.is_null() {
             let _guard = BridgeMemoryGuard(windows.data);
