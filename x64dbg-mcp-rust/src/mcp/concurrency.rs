@@ -1,6 +1,7 @@
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use once_cell::sync::Lazy;
 use rhai::{Array, Dynamic, Engine, Map};
+use std::fmt::Write as FmtWrite;
 use std::os::raw::c_void;
 use std::sync::OnceLock;
 use tokio::sync::oneshot;
@@ -229,12 +230,13 @@ pub extern "C" fn drain_task_queue_callback(_userdata: *mut c_void) {
 
                             instructions.push(CFGInstruction {
                                 address: format!("0x{:X}", instr.addr),
-                                bytes: instr
-                                    .data
-                                    .iter()
-                                    .map(|b| format!("{:02X}", b))
-                                    .collect::<Vec<String>>()
-                                    .join(""),
+                                bytes: {
+                                    let mut s = String::with_capacity(instr.data.len() * 2);
+                                    for b in &instr.data {
+                                        let _ = write!(s, "{:02X}", b);
+                                    }
+                                    s
+                                },
                             });
                         }
 
@@ -387,8 +389,7 @@ static RHAI_ENGINE: Lazy<Engine> = Lazy::new(|| {
     engine.register_fn("get_breakpoints", || -> Array {
         let v =
             serde_json::to_value(get_breakpoints_api()).unwrap_or(serde_json::Value::Array(vec![]));
-        if json_to_rhai(v).is_array() {
-            let a = json_to_rhai(v).into_array().unwrap();
+        if let Dynamic::Array(a) = json_to_rhai(v) {
             a
         } else {
             Array::new()
@@ -396,8 +397,7 @@ static RHAI_ENGINE: Lazy<Engine> = Lazy::new(|| {
     });
     engine.register_fn("get_modules", || -> Array {
         let v = serde_json::to_value(get_modules_api()).unwrap_or(serde_json::Value::Array(vec![]));
-        if json_to_rhai(v).is_array() {
-            let a = json_to_rhai(v).into_array().unwrap();
+        if let Dynamic::Array(a) = json_to_rhai(v) {
             a
         } else {
             Array::new()
@@ -405,8 +405,7 @@ static RHAI_ENGINE: Lazy<Engine> = Lazy::new(|| {
     });
     engine.register_fn("get_threads", || -> Array {
         let v = serde_json::to_value(get_threads_api()).unwrap_or(serde_json::Value::Array(vec![]));
-        if json_to_rhai(v).is_array() {
-            let a = json_to_rhai(v).into_array().unwrap();
+        if let Dynamic::Array(a) = json_to_rhai(v) {
             a
         } else {
             Array::new()
@@ -415,8 +414,7 @@ static RHAI_ENGINE: Lazy<Engine> = Lazy::new(|| {
     engine.register_fn("get_call_stack", || -> Array {
         let v =
             serde_json::to_value(get_call_stack_api()).unwrap_or(serde_json::Value::Array(vec![]));
-        if json_to_rhai(v).is_array() {
-            let a = json_to_rhai(v).into_array().unwrap();
+        if let Dynamic::Array(a) = json_to_rhai(v) {
             a
         } else {
             Array::new()
@@ -425,8 +423,7 @@ static RHAI_ENGINE: Lazy<Engine> = Lazy::new(|| {
     engine.register_fn("get_symbols", |module: &str| -> Array {
         let v = serde_json::to_value(get_symbols_api(module))
             .unwrap_or(serde_json::Value::Array(vec![]));
-        if json_to_rhai(v).is_array() {
-            let a = json_to_rhai(v).into_array().unwrap();
+        if let Dynamic::Array(a) = json_to_rhai(v) {
             a
         } else {
             Array::new()

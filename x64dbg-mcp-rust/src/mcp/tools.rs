@@ -2,6 +2,7 @@ use crate::mcp::types::*;
 use crate::x64dbg::api::*;
 use rmcp::{model::*, ErrorData};
 use serde_json::Value;
+use std::fmt::Write as FmtWrite;
 
 use crate::mcp::concurrency::{
     drain_task_queue_callback, DbgRequest, DbgResponse, McpTask, TASK_TX,
@@ -11,6 +12,32 @@ use tokio::sync::oneshot;
 pub fn parse_hex(s: &str) -> Result<usize, ErrorData> {
     usize::from_str_radix(s.trim_start_matches("0x"), 16)
         .map_err(|_| ErrorData::invalid_params(format!("Invalid hex format: {}", s), None))
+}
+
+/// Encode a byte slice as an uppercase hex string with bytes separated by spaces.
+/// Uses a pre-allocated buffer to avoid N intermediate String allocations.
+fn bytes_to_hex_spaced(data: &[u8]) -> String {
+    if data.is_empty() {
+        return String::new();
+    }
+    let mut s = String::with_capacity(data.len() * 3 - 1);
+    for (i, b) in data.iter().enumerate() {
+        if i > 0 {
+            s.push(' ');
+        }
+        let _ = write!(s, "{:02X}", b);
+    }
+    s
+}
+
+/// Encode a byte slice as a contiguous uppercase hex string (no separator).
+/// Uses a pre-allocated buffer to avoid N intermediate String allocations.
+fn bytes_to_hex(data: &[u8]) -> String {
+    let mut s = String::with_capacity(data.len() * 2);
+    for b in data {
+        let _ = write!(s, "{:02X}", b);
+    }
+    s
 }
 
 async fn dispatch_dbg_request(request: DbgRequest) -> Result<DbgResponse, ErrorData> {
@@ -73,11 +100,7 @@ pub async fn handle_read_memory(
             Ok(CallToolResult::success(vec![Content::text(format!(
                 "Address: 0x{:X}\nHex: {}",
                 addr,
-                buffer
-                    .iter()
-                    .map(|b| format!("{:02X}", b))
-                    .collect::<Vec<String>>()
-                    .join(" ")
+                bytes_to_hex_spaced(&buffer)
             ))]))
         }
         DbgResponse::MemoryData(None) => Ok(CallToolResult::error(vec![Content::text(
@@ -199,7 +222,7 @@ pub async fn handle_set_comment(
     })
     .await?
     {
-        DbgResponse::CommandSuccess(success) => Ok(CallToolResult::success(vec![Content::text(
+        DbgResponse::Boolean(success) => Ok(CallToolResult::success(vec![Content::text(
             format!("Success: {}", success),
         )])),
         _ => Err(ErrorData::internal_error("Unexpected response value", None)),
@@ -218,7 +241,7 @@ pub async fn handle_set_label(request: CallToolRequestParams) -> Result<CallTool
     })
     .await?
     {
-        DbgResponse::CommandSuccess(success) => Ok(CallToolResult::success(vec![Content::text(
+        DbgResponse::Boolean(success) => Ok(CallToolResult::success(vec![Content::text(
             format!("Success: {}", success),
         )])),
         _ => Err(ErrorData::internal_error("Unexpected response value", None)),
@@ -531,7 +554,7 @@ fn parse_value(data: &[u8], t: &str) -> serde_json::Value {
         let s = String::from_utf8_lossy(data);
         return serde_json::Value::String(s.trim_end_matches('\0').to_string());
     } else if t.starts_with("u8[") {
-        let hex: String = data.iter().map(|b| format!("{:02X}", b)).collect();
+        let hex = bytes_to_hex(data);
         return serde_json::Value::String(hex);
     }
 
@@ -800,5 +823,28 @@ mod tests {
         let data = vec![b'H', b'e', b'l', b'l', b'o', 0x00];
         let val = parse_value(&data, "char[6]");
         assert_eq!(val, serde_json::json!("Hello"));
+    }
+
+    #[test]
+    fn test_bytes_to_hex_spaced() {
+        assert_eq!(bytes_to_hex_spaced(&[]), "");
+        assert_eq!(bytes_to_hex_spaced(&[0xDE]), "DE");
+        assert_eq!(bytes_to_hex_spaced(&[0xDE, 0xAD, 0xBE, 0xEF]), "DE AD BE EF");
+        assert_eq!(bytes_to_hex_spaced(&[0x00, 0xFF]), "00 FF");
+    }
+
+    #[test]
+    fn test_bytes_to_hex() {
+        assert_eq!(bytes_to_hex(&[]), "");
+        assert_eq!(bytes_to_hex(&[0xAB]), "AB");
+        assert_eq!(bytes_to_hex(&[0xCA, 0xFE, 0xBA, 0xBE]), "CAFEBABE");
+        assert_eq!(bytes_to_hex(&[0x00, 0x0F]), "000F");
+    }
+
+    #[test]
+    fn test_parse_value_u8_array() {
+        let data = vec![0xDE, 0xAD, 0xBE, 0xEF];
+        let val = parse_value(&data, "u8[4]");
+        assert_eq!(val, serde_json::json!("DEADBEEF"));
     }
 }

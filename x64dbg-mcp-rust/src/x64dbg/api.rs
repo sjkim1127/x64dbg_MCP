@@ -396,9 +396,8 @@ pub fn get_strings_api(module_name: &str) -> Vec<serde_json::Value> {
     let chunk_size = 0x10000; // 64KB chunks
 
     // Performance optimization: Read module in chunks and scan in Rust
-    for current_addr in (base..base + size).step_by(chunk_size as usize) {
-        // Cast chunk_size to usize
-        let read_len = std::cmp::min(chunk_size, (base + size) - current_addr) as usize; // Cast to usize
+    'outer: for current_addr in (base..base + size).step_by(chunk_size as usize) {
+        let read_len = std::cmp::min(chunk_size, (base + size) - current_addr) as usize;
         if let Some(buffer) = read_memory_api(current_addr, read_len) {
             let mut start = 0;
             while start < buffer.len() {
@@ -413,7 +412,7 @@ pub fn get_strings_api(module_name: &str) -> Vec<serde_json::Value> {
                     if end - start >= 4 {
                         if let Ok(content) = std::str::from_utf8(&buffer[start..end]) {
                             strings.push(serde_json::json!({
-                                "address": format!("0x{:X}", current_addr + start as u64), // Cast start to duint
+                                "address": format!("0x{:X}", current_addr + start as u64),
                                 "content": content.to_string()
                             }));
                         }
@@ -424,12 +423,9 @@ pub fn get_strings_api(module_name: &str) -> Vec<serde_json::Value> {
                 }
 
                 if strings.len() >= 1000 {
-                    break;
+                    break 'outer;
                 }
             }
-        }
-        if strings.len() >= 1000 {
-            break;
         }
     }
 
