@@ -101,3 +101,14 @@ pub struct CFGInstruction {
     pub address: String,
     pub bytes: String,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct MemoryAddressArgs {
+    pub address: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct BookmarkArgs {
+    pub address: String,
+    pub is_bookmark: bool,
+}

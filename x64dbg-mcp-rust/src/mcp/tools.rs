@@ -447,3 +447,112 @@ pub async fn handle_execute_script(request: CallToolRequestParams) -> Result<Cal
         _ => Err(ErrorData::internal_error("Unexpected response value", None))
     }
 }
+
+pub async fn handle_get_xrefs(request: CallToolRequestParams) -> Result<CallToolResult, ErrorData> {
+    let args: MemoryAddressArgs = serde_json::from_value(Value::Object(request.arguments.unwrap_or_default()))
+        .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+    let addr = parse_hex(&args.address)?;
+    
+    match dispatch_dbg_request(DbgRequest::GetXrefs(addr)).await? {
+        DbgResponse::GenericList(v) => {
+            let json_str = serde_json::to_string_pretty(&v).unwrap_or_default();
+            Ok(CallToolResult::success(vec![Content::text(json_str)]))
+        },
+        _ => Err(ErrorData::internal_error("Unexpected response value", None))
+    }
+}
+
+pub async fn handle_get_memory_map_full(_request: CallToolRequestParams) -> Result<CallToolResult, ErrorData> {
+    match dispatch_dbg_request(DbgRequest::GetMemoryMapFull).await? {
+        DbgResponse::GenericList(v) => {
+            let json_str = serde_json::to_string_pretty(&v).unwrap_or_default();
+            Ok(CallToolResult::success(vec![Content::text(json_str)]))
+        },
+        _ => Err(ErrorData::internal_error("Unexpected response value", None))
+    }
+}
+
+pub async fn handle_disassemble_range(request: CallToolRequestParams) -> Result<CallToolResult, ErrorData> {
+    let args: ReadMemoryArgs = serde_json::from_value(Value::Object(request.arguments.unwrap_or_default()))
+        .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+    let addr = parse_hex(&args.address)?;
+    
+    match dispatch_dbg_request(DbgRequest::DisassembleRange { address: addr, count: args.size }).await? {
+        DbgResponse::GenericList(v) => {
+            let json_str = serde_json::to_string_pretty(&v).unwrap_or_else(|_| "[]".to_string());
+            Ok(CallToolResult::success(vec![Content::text(json_str)]))
+        },
+        _ => Err(ErrorData::internal_error("Unexpected response value", None))
+    }
+}
+
+pub async fn handle_bookmark(request: CallToolRequestParams) -> Result<CallToolResult, ErrorData> {
+    let args: BookmarkArgs = serde_json::from_value(Value::Object(request.arguments.unwrap_or_default()))
+        .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
+    let addr = parse_hex(&args.address)?;
+    
+    match dispatch_dbg_request(DbgRequest::Bookmark { address: addr, is_set: args.is_bookmark }).await? {
+        DbgResponse::Boolean(success) => Ok(CallToolResult::success(vec![Content::text(format!("Bookmark toggled: {}", success))])),
+        _ => Err(ErrorData::internal_error("Unexpected response value", None))
+    }
+}
+
+pub async fn handle_get_peb_teb(_request: CallToolRequestParams) -> Result<CallToolResult, ErrorData> {
+    match dispatch_dbg_request(DbgRequest::GetPebTeb).await? {
+        DbgResponse::GenericValue(v) => {
+            let json_str = serde_json::to_string_pretty(&v).unwrap_or_default();
+            Ok(CallToolResult::success(vec![Content::text(json_str)]))
+        },
+        _ => Err(ErrorData::internal_error("Unexpected response value", None))
+    }
+}
+
+pub async fn handle_get_tcp_connections(_request: CallToolRequestParams) -> Result<CallToolResult, ErrorData> {
+    match dispatch_dbg_request(DbgRequest::GetTcpConnections).await? {
+        DbgResponse::GenericList(v) => {
+            let json_str = serde_json::to_string_pretty(&v).unwrap_or_default();
+            Ok(CallToolResult::success(vec![Content::text(json_str)]))
+        },
+        _ => Err(ErrorData::internal_error("Unexpected response value", None))
+    }
+}
+
+pub async fn handle_get_handles(_request: CallToolRequestParams) -> Result<CallToolResult, ErrorData> {
+    match dispatch_dbg_request(DbgRequest::GetHandles).await? {
+        DbgResponse::GenericList(v) => {
+            let json_str = serde_json::to_string_pretty(&v).unwrap_or_default();
+            Ok(CallToolResult::success(vec![Content::text(json_str)]))
+        },
+        _ => Err(ErrorData::internal_error("Unexpected response value", None))
+    }
+}
+
+pub async fn handle_get_patches(_request: CallToolRequestParams) -> Result<CallToolResult, ErrorData> {
+    match dispatch_dbg_request(DbgRequest::GetPatches).await? {
+        DbgResponse::GenericList(v) => {
+            let json_str = serde_json::to_string_pretty(&v).unwrap_or_default();
+            Ok(CallToolResult::success(vec![Content::text(json_str)]))
+        },
+        _ => Err(ErrorData::internal_error("Unexpected response value", None))
+    }
+}
+
+pub async fn handle_get_heaps(_request: CallToolRequestParams) -> Result<CallToolResult, ErrorData> {
+    match dispatch_dbg_request(DbgRequest::GetHeaps).await? {
+        DbgResponse::GenericList(v) => {
+            let json_str = serde_json::to_string_pretty(&v).unwrap_or_default();
+            Ok(CallToolResult::success(vec![Content::text(json_str)]))
+        },
+        _ => Err(ErrorData::internal_error("Unexpected response value", None))
+    }
+}
+
+pub async fn handle_get_windows(_request: CallToolRequestParams) -> Result<CallToolResult, ErrorData> {
+    match dispatch_dbg_request(DbgRequest::GetWindows).await? {
+        DbgResponse::GenericList(v) => {
+            let json_str = serde_json::to_string_pretty(&v).unwrap_or_default();
+            Ok(CallToolResult::success(vec![Content::text(json_str)]))
+        },
+        _ => Err(ErrorData::internal_error("Unexpected response value", None))
+    }
+}

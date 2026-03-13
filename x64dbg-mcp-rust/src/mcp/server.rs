@@ -362,6 +362,76 @@ impl ServerHandler for X64DbgMcpServer {
                             },
                             "required": ["script"]
                         })))
+                    ),
+                    Tool::new(
+                        "GetXrefs",
+                        "Get all cross-references (calls, jumps, data access) to a specific address.",
+                        Arc::new(to_json_object(json!({
+                            "type": "object",
+                            "properties": {
+                                "address": { "type": "string", "description": "Hex address" }
+                            },
+                            "required": ["address"]
+                        })))
+                    ),
+                    Tool::new(
+                        "GetMemoryMapFull",
+                        "Get the full memory map of the process, including non-module regions and their protection states.",
+                        Arc::new(to_json_object(json!({ "type": "object", "properties": {} })))
+                    ),
+                    Tool::new(
+                        "DisassembleRange",
+                        "Disassemble a range of instructions starting from an address.",
+                        Arc::new(to_json_object(json!({
+                            "type": "object",
+                            "properties": {
+                                "address": { "type": "string", "description": "Starting hex address" },
+                                "size": { "type": "integer", "description": "Number of instructions to disassemble" }
+                            },
+                            "required": ["address", "size"]
+                        })))
+                    ),
+                    Tool::new(
+                        "SetBookmark",
+                        "Set or remove a bookmark at a specific address.",
+                        Arc::new(to_json_object(json!({
+                            "type": "object",
+                            "properties": {
+                                "address": { "type": "string", "description": "Hex address" },
+                                "is_bookmark": { "type": "boolean", "description": "Set true to add, false to remove" }
+                            },
+                            "required": ["address", "is_bookmark"]
+                        })))
+                    ),
+                    Tool::new(
+                        "GetPebTeb",
+                        "Retrieve the PEB and TEB addresses of the current process and thread.",
+                        Arc::new(to_json_object(json!({ "type": "object", "properties": {} })))
+                    ),
+                    Tool::new(
+                        "GetTcpConnections",
+                        "List all active TCP connections (remote/local IP and Port) of the debugged process.",
+                        Arc::new(to_json_object(json!({ "type": "object", "properties": {} })))
+                    ),
+                    Tool::new(
+                        "GetHandles",
+                        "List all system handles (files, keys, etc.) owned by the debugged process.",
+                        Arc::new(to_json_object(json!({ "type": "object", "properties": {} })))
+                    ),
+                    Tool::new(
+                        "GetPatches",
+                        "List all byte patches currently applied to the debugged process (original vs patched).",
+                        Arc::new(to_json_object(json!({ "type": "object", "properties": {} })))
+                    ),
+                    Tool::new(
+                        "GetHeaps",
+                        "List all memory heaps allocated by the debugged process.",
+                        Arc::new(to_json_object(json!({ "type": "object", "properties": {} })))
+                    ),
+                    Tool::new(
+                        "GetWindows",
+                        "List all GUI windows created by the debugged process, including handles and titles.",
+                        Arc::new(to_json_object(json!({ "type": "object", "properties": {} })))
                     )
                 ],
                 next_cursor: None,
@@ -405,6 +475,16 @@ impl ServerHandler for X64DbgMcpServer {
                 "GetSymbols" => tools::handle_get_symbols(request).await,
                 "GetStrings" => tools::handle_get_strings(request).await,
                 "ExecuteScript" => tools::handle_execute_script(request).await,
+                "GetXrefs" => tools::handle_get_xrefs(request).await,
+                "GetMemoryMapFull" => tools::handle_get_memory_map_full(request).await,
+                "DisassembleRange" => tools::handle_disassemble_range(request).await,
+                "SetBookmark" => tools::handle_bookmark(request).await,
+                "GetPebTeb" => tools::handle_get_peb_teb(request).await,
+                "GetTcpConnections" => tools::handle_get_tcp_connections(request).await,
+                "GetHandles" => tools::handle_get_handles(request).await,
+                "GetPatches" => tools::handle_get_patches(request).await,
+                "GetHeaps" => tools::handle_get_heaps(request).await,
+                "GetWindows" => tools::handle_get_windows(request).await,
                 _ => Err(ErrorData::invalid_params(
                     format!("Unknown tool: {}", request.name),
                     None,

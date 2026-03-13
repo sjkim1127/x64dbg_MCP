@@ -25,6 +25,16 @@ pub enum DbgRequest {
     GetSymbols(String), // module name
     GetStrings(String), // module name
     ExecuteScript(String), // Rhai script content
+    GetXrefs(usize),
+    GetMemoryMapFull,
+    DisassembleRange { address: usize, count: usize },
+    Bookmark { address: usize, is_set: bool },
+    GetPebTeb,
+    GetTcpConnections,
+    GetHandles,
+    GetPatches,
+    GetHeaps,
+    GetWindows,
 }
 
 pub enum DbgResponse {
@@ -40,6 +50,8 @@ pub enum DbgResponse {
     ScriptResult(Result<String, String>),
     Symbols(Vec<serde_json::Value>),
     Strings(Vec<serde_json::Value>),
+    GenericList(Vec<serde_json::Value>),
+    GenericValue(serde_json::Value),
 }
 
 pub struct McpTask {
@@ -243,6 +255,36 @@ pub extern "C" fn drain_task_queue_callback(_userdata: *mut c_void) {
                     },
                     Err(e) => DbgResponse::ScriptResult(Err(e.to_string())),
                 }
+            }
+            DbgRequest::GetXrefs(addr) => {
+                DbgResponse::GenericList(get_xrefs_api(addr as duint))
+            }
+            DbgRequest::GetMemoryMapFull => {
+                DbgResponse::GenericList(get_memory_map_full_api())
+            }
+            DbgRequest::DisassembleRange { address, count } => {
+                DbgResponse::GenericList(disassemble_range_api(address as duint, count))
+            }
+            DbgRequest::Bookmark { address, is_set } => {
+                DbgResponse::Boolean(bookmark_api(address as duint, is_set))
+            }
+            DbgRequest::GetPebTeb => {
+                DbgResponse::GenericValue(get_peb_teb_api())
+            }
+            DbgRequest::GetTcpConnections => {
+                DbgResponse::GenericList(get_tcp_connections_api())
+            }
+            DbgRequest::GetHandles => {
+                DbgResponse::GenericList(get_handles_api())
+            }
+            DbgRequest::GetPatches => {
+                DbgResponse::GenericList(get_patches_api())
+            }
+            DbgRequest::GetHeaps => {
+                DbgResponse::GenericList(get_heaps_api())
+            }
+            DbgRequest::GetWindows => {
+                DbgResponse::GenericList(get_windows_api())
             }
         };
 
