@@ -222,9 +222,10 @@ pub async fn handle_set_comment(
     })
     .await?
     {
-        DbgResponse::Boolean(success) => Ok(CallToolResult::success(vec![Content::text(
-            format!("Success: {}", success),
-        )])),
+        DbgResponse::Boolean(success) => Ok(CallToolResult::success(vec![Content::text(format!(
+            "Success: {}",
+            success
+        ))])),
         _ => Err(ErrorData::internal_error("Unexpected response value", None)),
     }
 }
@@ -241,9 +242,10 @@ pub async fn handle_set_label(request: CallToolRequestParams) -> Result<CallTool
     })
     .await?
     {
-        DbgResponse::Boolean(success) => Ok(CallToolResult::success(vec![Content::text(
-            format!("Success: {}", success),
-        )])),
+        DbgResponse::Boolean(success) => Ok(CallToolResult::success(vec![Content::text(format!(
+            "Success: {}",
+            success
+        ))])),
         _ => Err(ErrorData::internal_error("Unexpected response value", None)),
     }
 }
@@ -829,7 +831,10 @@ mod tests {
     fn test_bytes_to_hex_spaced() {
         assert_eq!(bytes_to_hex_spaced(&[]), "");
         assert_eq!(bytes_to_hex_spaced(&[0xDE]), "DE");
-        assert_eq!(bytes_to_hex_spaced(&[0xDE, 0xAD, 0xBE, 0xEF]), "DE AD BE EF");
+        assert_eq!(
+            bytes_to_hex_spaced(&[0xDE, 0xAD, 0xBE, 0xEF]),
+            "DE AD BE EF"
+        );
         assert_eq!(bytes_to_hex_spaced(&[0x00, 0xFF]), "00 FF");
     }
 
