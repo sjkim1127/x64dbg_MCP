@@ -6,7 +6,12 @@ use std::sync::OnceLock;
 use tokio::sync::oneshot;
 
 use crate::mcp::types::*;
+use crate::x64dbg;
 use crate::x64dbg::api::*;
+use crate::x64dbg::{
+    BridgeCFGraphList, BridgeCFInstruction, BridgeCFNodeList, BridgeFree, DbgAnalyzeFunction,
+    DbgFunctionGet, DbgGetStringAt, duint,
+};
 
 pub enum DbgRequest {
     ExecuteCommand(String),
@@ -29,6 +34,9 @@ pub enum DbgRequest {
     GetMemoryMapFull,
     DisassembleRange { address: usize, count: usize },
     Bookmark { address: usize, is_set: bool },
+    AssembleMem { address: String, instruction: String },
+    PatternFindMem { start: String, pattern: String },
+    MiscParseExpression { expression: String },
     GetPebTeb,
     GetTcpConnections,
     GetHandles,
@@ -283,6 +291,24 @@ pub extern "C" fn drain_task_queue_callback(_userdata: *mut c_void) {
             }
             DbgRequest::Bookmark { address, is_set } => {
                 DbgResponse::Boolean(bookmark_api(address as duint, is_set))
+            }
+            DbgRequest::AssembleMem {
+                address,
+                instruction,
+            } => {
+                let cmd = format!("asm {}, \"{}\"", address, instruction);
+                let result = execute_command_api(&cmd);
+                DbgResponse::CommandSuccess(result)
+            }
+            DbgRequest::PatternFindMem { start, pattern } => {
+                let cmd = format!("find {}, \"{}\"", start, pattern);
+                let result = execute_command_api(&cmd);
+                DbgResponse::CommandSuccess(result)
+            }
+            DbgRequest::MiscParseExpression { expression } => {
+                let cmd = format!("? {}", expression);
+                let result = execute_command_api(&cmd);
+                DbgResponse::CommandSuccess(result)
             }
             DbgRequest::GetPebTeb => DbgResponse::GenericValue(get_peb_teb_api()),
             DbgRequest::GetTcpConnections => DbgResponse::GenericList(get_tcp_connections_api()),

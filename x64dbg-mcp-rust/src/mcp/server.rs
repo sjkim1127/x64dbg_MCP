@@ -2,13 +2,12 @@ use super::tools::*;
 use crate::x64dbg::api::log_print;
 use once_cell::sync::Lazy;
 use rmcp::{
-    model::*,
+    model::*, ErrorData, Resource, Server, Tool,
     service::{Peer, RequestContext},
     transport::{
         streamable_http_server::session::local::LocalSessionManager, StreamableHttpServerConfig,
-        StreamableHttpService,
     },
-    ErrorData, RoleServer, ServerHandler,
+    ServerHandler,
 };
 use serde_json::{json, Value};
 use std::future::Future;
@@ -25,16 +24,16 @@ pub async fn broadcast_event(level: LoggingLevel, data: Value) {
     };
 
     for peer in peers {
-        let notif = ServerNotification::LoggingMessageNotification(LoggingMessageNotification {
-            params: LoggingMessageNotificationParam {
-                level,
-                data: data.clone(),
-                logger: Some("x64dbg".to_string()),
-            },
-            method: LoggingMessageNotificationMethod,
-            extensions: Default::default(),
+        let params = LoggingMessageNotificationParams::new(level, data.clone())
+            .with_logger("x64dbg".to_string());
+        let notif_inner = LoggingMessageNotification::new(params);
+        let notif = ServerNotification::LoggingMessageNotification(notif_inner);
+
+        let peer2 = peer.clone();
+        let notif2 = notif.clone();
+        tokio::spawn(async move {
+            let _ = peer2.notify(notif2).await;
         });
-        let _ = peer.send_notification(notif).await;
     }
 }
 
@@ -452,22 +451,22 @@ impl ServerHandler for X64DbgMcpServer {
                 "PatternFindMem" => handle_pattern_find_mem(request).await,
                 "MemoryIsValidPtr" => handle_memory_is_valid_ptr(request).await,
                 "MiscParseExpression" => handle_misc_parse_expression(request).await,
-                "YaraScanMem" => tools::handle_yara_scan_mem(request).await,
-                "AnalyzeFunction" => tools::handle_analyze_function(request).await,
-                "StructDumpMem" => tools::handle_struct_dump_mem(request).await,
-                "GetSymbols" => tools::handle_get_symbols(request).await,
-                "GetStrings" => tools::handle_get_strings(request).await,
-                "ExecuteScript" => tools::handle_execute_script(request).await,
-                "GetXrefs" => tools::handle_get_xrefs(request).await,
-                "GetMemoryMapFull" => tools::handle_get_memory_map_full(request).await,
-                "DisassembleRange" => tools::handle_disassemble_range(request).await,
-                "SetBookmark" => tools::handle_bookmark(request).await,
-                "GetPebTeb" => tools::handle_get_peb_teb(request).await,
-                "GetTcpConnections" => tools::handle_get_tcp_connections(request).await,
-                "GetHandles" => tools::handle_get_handles(request).await,
-                "GetPatches" => tools::handle_get_patches(request).await,
-                "GetHeaps" => tools::handle_get_heaps(request).await,
-                "GetWindows" => tools::handle_get_windows(request).await,
+                "YaraScanMem" => handle_yara_scan_mem(request).await,
+                "AnalyzeFunction" => handle_analyze_function(request).await,
+                "StructDumpMem" => handle_struct_dump_mem(request).await,
+                "GetSymbols" => handle_get_symbols(request).await,
+                "GetStrings" => handle_get_strings(request).await,
+                "ExecuteScript" => handle_execute_script(request).await,
+                "GetXrefs" => handle_get_xrefs(request).await,
+                "GetMemoryMapFull" => handle_get_memory_map_full(request).await,
+                "DisassembleRange" => handle_disassemble_range(request).await,
+                "SetBookmark" => handle_bookmark(request).await,
+                "GetPebTeb" => handle_get_peb_teb(request).await,
+                "GetTcpConnections" => handle_get_tcp_connections(request).await,
+                "GetHandles" => handle_get_handles(request).await,
+                "GetPatches" => handle_get_patches(request).await,
+                "GetHeaps" => handle_get_heaps(request).await,
+                "GetWindows" => handle_get_windows(request).await,
                 _ => Err(ErrorData::invalid_params(
                     format!("Unknown tool: {}", request.name),
                     None,

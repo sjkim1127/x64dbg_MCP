@@ -112,3 +112,20 @@ pub struct BookmarkArgs {
     pub address: String,
     pub is_bookmark: bool,
 }
+
+#[derive(Debug, Deserialize)]
+pub struct AssembleMemArgs {
+    pub address: String,
+    pub instruction: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct PatternFindMemArgs {
+    pub start: String,
+    pub pattern: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct MiscParseExpressionArgs {
+    pub expression: String,
+}

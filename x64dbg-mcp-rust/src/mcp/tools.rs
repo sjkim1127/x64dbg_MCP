@@ -294,8 +294,12 @@ pub async fn handle_assemble_mem(
     let args: AssembleMemArgs =
         serde_json::from_value(Value::Object(request.arguments.unwrap_or_default()))
             .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
-    let cmd = format!("asm {}, \"{}\"", args.address, args.instruction);
-    match dispatch_dbg_request(DbgRequest::ExecuteCommand(cmd)).await? {
+    match dispatch_dbg_request(DbgRequest::AssembleMem {
+        address: args.address,
+        instruction: args.instruction,
+    })
+    .await?
+    {
         DbgResponse::CommandSuccess(success) => Ok(CallToolResult::success(vec![Content::text(
             format!("Success: {}", success),
         )])),
@@ -309,8 +313,12 @@ pub async fn handle_pattern_find_mem(
     let args: PatternFindMemArgs =
         serde_json::from_value(Value::Object(request.arguments.unwrap_or_default()))
             .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
-    let cmd = format!("find {}, \"{}\"", args.start, args.pattern);
-    match dispatch_dbg_request(DbgRequest::ExecuteCommand(cmd)).await? {
+    match dispatch_dbg_request(DbgRequest::PatternFindMem {
+        start: args.start,
+        pattern: args.pattern,
+    })
+    .await?
+    {
         DbgResponse::CommandSuccess(success) => Ok(CallToolResult::success(vec![Content::text(
             format!("Issued find command: {}", success),
         )])),
@@ -340,8 +348,11 @@ pub async fn handle_misc_parse_expression(
     let args: MiscParseExpressionArgs =
         serde_json::from_value(Value::Object(request.arguments.unwrap_or_default()))
             .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
-    let cmd = format!("? {}", args.expression);
-    match dispatch_dbg_request(DbgRequest::ExecuteCommand(cmd)).await? {
+    match dispatch_dbg_request(DbgRequest::MiscParseExpression {
+        expression: args.expression,
+    })
+    .await?
+    {
         DbgResponse::CommandSuccess(success) => Ok(CallToolResult::success(vec![Content::text(
             format!("Issued expression evaluation: {}", success),
         )])),
@@ -387,15 +398,15 @@ pub async fn handle_yara_scan_mem(
                                 }
                             }
                             if matches.is_empty() {
-                                Ok("No YARA rule matches found.".to_string())
+                                "No YARA rule matches found.".to_string()
                             } else {
-                                Ok(matches.join("\n"))
+                                matches.join("\n")
                             }
                         }
-                        Err(err) => Ok(format!("YARA scan error: {:?}", err)),
+                        Err(err) => format!("YARA scan error: {:?}", err),
                     }
                 }
-                Err(e) => Ok(format!("Rule compilation failed: {:?}", e)),
+                Err(e) => format!("Rule compilation failed: {:?}", e),
             }
         })
         .await
