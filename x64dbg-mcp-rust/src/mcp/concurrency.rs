@@ -2,7 +2,8 @@ use crossbeam_channel::{unbounded, Receiver, Sender};
 use once_cell::sync::Lazy;
 use std::os::raw::c_void;
 use tokio::sync::oneshot;
-use rhai::Engine;
+use rhai::{Engine, Dynamic, Array, Map};
+use std::sync::OnceLock;
 
 use crate::x64dbg::api::*;
 use crate::mcp::types::*;
@@ -29,17 +30,16 @@ pub enum DbgRequest {
 pub enum DbgResponse {
     CommandSuccess(bool),
     MemoryData(Option<Vec<u8>>),
-    Registers(Option<String>),
-    Breakpoints(String),
-    Threads(String),
-    Modules(String),
-    CallStack(String),
+    Registers(Option<serde_json::Value>),
+    Breakpoints(Vec<serde_json::Value>),
+    Threads(Vec<serde_json::Value>),
+    Modules(Vec<serde_json::Value>),
+    CallStack(Vec<serde_json::Value>),
     Boolean(bool),
     FunctionAnalysis(Option<AnalyzeFunctionResult>),
     ScriptResult(Result<String, String>),
-    // We will return JSON strings for symbols and strings to keep it simple over the channel
-    Symbols(String),
-    Strings(String),
+    Symbols(Vec<serde_json::Value>),
+    Strings(Vec<serde_json::Value>),
 }
 
 pub struct McpTask {
@@ -49,17 +49,19 @@ pub struct McpTask {
 
 pub static TASK_TX: Lazy<Sender<McpTask>> = Lazy::new(|| {
     let (tx, rx) = unbounded();
-    unsafe {
-        GLOBAL_RX = Some(rx);
-    }
+    GLOBAL_RX.set(rx).expect("GLOBAL_RX already initialized");
     tx
 });
 
-static mut GLOBAL_RX: Option<Receiver<McpTask>> = None;
+static GLOBAL_RX: OnceLock<Receiver<McpTask>> = OnceLock::new();
 
 // Callback executed by x64dbg GUI Thread
 pub extern "C" fn drain_task_queue_callback(_userdata: *mut c_void) {
-    let rx = unsafe { GLOBAL_RX.as_ref().unwrap() };
+    let rx = if let Some(rx) = GLOBAL_RX.get() {
+        rx
+    } else {
+        return;
+    };
 
     while let Ok(task) = rx.try_recv() {
         let response = match task.request {
@@ -72,7 +74,7 @@ pub extern "C" fn drain_task_queue_callback(_userdata: *mut c_void) {
                 DbgResponse::MemoryData(data)
             }
             DbgRequest::GetRegisters => {
-                let reg_str = if let Some(reg_dump) = get_registers_api() {
+                let reg_val = if let Some(reg_dump) = get_registers_api() {
                     let regs = &reg_dump.regcontext;
                     let mut reg_map = serde_json::Map::new();
 
@@ -98,11 +100,11 @@ pub extern "C" fn drain_task_queue_callback(_userdata: *mut c_void) {
                         reg_map.insert("r14".into(), serde_json::json!(format!("0x{:X}", regs.r14)));
                         reg_map.insert("r15".into(), serde_json::json!(format!("0x{:X}", regs.r15)));
                     }
-                    Some(serde_json::to_string_pretty(&serde_json::Value::Object(reg_map)).unwrap())
+                    Some(serde_json::Value::Object(reg_map))
                 } else {
                     None
                 };
-                DbgResponse::Registers(reg_str)
+                DbgResponse::Registers(reg_val)
             }
             DbgRequest::SetRegister { register, value } => {
                 let cmd = format!("{}={}", register, value);
@@ -110,8 +112,7 @@ pub extern "C" fn drain_task_queue_callback(_userdata: *mut c_void) {
                 DbgResponse::CommandSuccess(result)
             }
             DbgRequest::GetBreakpoints => {
-                let bplist = get_breakpoints_api();
-                DbgResponse::Breakpoints(serde_json::to_string_pretty(&bplist).unwrap())
+                DbgResponse::Breakpoints(get_breakpoints_api())
             }
             DbgRequest::SetBreakpoint(addr) => {
                 let cmd = format!("bp {}", addr);
@@ -119,16 +120,13 @@ pub extern "C" fn drain_task_queue_callback(_userdata: *mut c_void) {
                 DbgResponse::CommandSuccess(result)
             }
             DbgRequest::GetThreads => {
-                let tlist = get_threads_api();
-                DbgResponse::Threads(serde_json::to_string_pretty(&tlist).unwrap())
+                DbgResponse::Threads(get_threads_api())
             }
             DbgRequest::GetModules => {
-                let mlist = get_modules_api();
-                DbgResponse::Modules(serde_json::to_string_pretty(&mlist).unwrap())
+                DbgResponse::Modules(get_modules_api())
             }
             DbgRequest::GetCallStack => {
-                let cslist = get_call_stack_api();
-                DbgResponse::CallStack(serde_json::to_string_pretty(&cslist).unwrap())
+                DbgResponse::CallStack(get_call_stack_api())
             }
             DbgRequest::SetComment { address, text } => {
                 let result = set_comment_at_api(address, &text);
@@ -231,101 +229,14 @@ pub extern "C" fn drain_task_queue_callback(_userdata: *mut c_void) {
                 }
             }
             DbgRequest::GetSymbols(module) => {
-                let symbols = get_symbols_api(&module);
-                DbgResponse::Symbols(serde_json::to_string(&symbols).unwrap_or_else(|_| "[]".to_string()))
+                DbgResponse::Symbols(get_symbols_api(&module))
             }
             DbgRequest::GetStrings(module) => {
-                let strings = get_strings_api(&module);
-                DbgResponse::Strings(serde_json::to_string(&strings).unwrap_or_else(|_| "[]".to_string()))
+                DbgResponse::Strings(get_strings_api(&module))
             }
             DbgRequest::ExecuteScript(script) => {
-                let mut engine = Engine::new();
-                
-                // Helper to convert serde_json to Rhai Dynamic
-                fn json_to_rhai(v: serde_json::Value) -> rhai::Dynamic {
-                    match v {
-                        serde_json::Value::Null => rhai::Dynamic::UNIT,
-                        serde_json::Value::Bool(b) => b.into(),
-                        serde_json::Value::Number(n) => {
-                            if let Some(i) = n.as_i64() { i.into() }
-                            else if let Some(f) = n.as_f64() { f.into() }
-                            else { rhai::Dynamic::UNIT }
-                        },
-                        serde_json::Value::String(s) => s.into(),
-                        serde_json::Value::Array(a) => {
-                            let arr: rhai::Array = a.into_iter().map(json_to_rhai).collect();
-                            arr.into()
-                        },
-                        serde_json::Value::Object(o) => {
-                            let mut map = rhai::Map::new();
-                            for (k, v) in o {
-                                map.insert(k.into(), json_to_rhai(v));
-                            }
-                            map.into()
-                        }
-                    }
-                }
-
-                // Register x64dbg APIs to Rhai
-                engine.register_fn("execute_command", |cmd: &str| -> bool {
-                    execute_command_api(cmd)
-                });
-                engine.register_fn("log_print", |msg: &str| {
-                    log_print(msg);
-                });
-                engine.register_fn("read_memory", |addr: i64, size: i64| -> rhai::Array {
-                    if let Some(data) = read_memory_api(addr as duint, size as usize) {
-                        data.into_iter().map(|b| (b as i64).into()).collect()
-                    } else {
-                        rhai::Array::new()
-                    }
-                });
-                engine.register_fn("get_registers", || -> rhai::Map {
-                    if let Some(reg_dump) = get_registers_api() {
-                        let mut map = rhai::Map::new();
-                        let regs = &reg_dump.regcontext;
-                        map.insert("rax".into(), (regs.cax as i64).into());
-                        map.insert("rbx".into(), (regs.cbx as i64).into());
-                        map.insert("rcx".into(), (regs.ccx as i64).into());
-                        map.insert("rdx".into(), (regs.cdx as i64).into());
-                        map.insert("rsi".into(), (regs.csi as i64).into());
-                        map.insert("rdi".into(), (regs.cdi as i64).into());
-                        map.insert("rbp".into(), (regs.cbp as i64).into());
-                        map.insert("rsp".into(), (regs.csp as i64).into());
-                        map.insert("rip".into(), (regs.cip as i64).into());
-                        map
-                    } else {
-                        rhai::Map::new()
-                    }
-                });
-
-                engine.register_fn("get_breakpoints", || -> rhai::Array {
-                    let v = serde_json::to_value(get_breakpoints_api()).unwrap_or(serde_json::Value::Array(vec![]));
-                    if let rhai::Dynamic::Array(a) = json_to_rhai(v) { a } else { rhai::Array::new() }
-                });
-                engine.register_fn("get_modules", || -> rhai::Array {
-                    let v = serde_json::to_value(get_modules_api()).unwrap_or(serde_json::Value::Array(vec![]));
-                    if let rhai::Dynamic::Array(a) = json_to_rhai(v) { a } else { rhai::Array::new() }
-                });
-                engine.register_fn("get_threads", || -> rhai::Array {
-                    let v = serde_json::to_value(get_threads_api()).unwrap_or(serde_json::Value::Array(vec![]));
-                    if let rhai::Dynamic::Array(a) = json_to_rhai(v) { a } else { rhai::Array::new() }
-                });
-                engine.register_fn("get_call_stack", || -> rhai::Array {
-                    let v = serde_json::to_value(get_call_stack_api()).unwrap_or(serde_json::Value::Array(vec![]));
-                    if let rhai::Dynamic::Array(a) = json_to_rhai(v) { a } else { rhai::Array::new() }
-                });
-                engine.register_fn("get_symbols", |module: &str| -> rhai::Array {
-                    let v = serde_json::to_value(get_symbols_api(module)).unwrap_or(serde_json::Value::Array(vec![]));
-                    if let rhai::Dynamic::Array(a) = json_to_rhai(v) { a } else { rhai::Array::new() }
-                });
-                engine.register_fn("get_strings", |module: &str| -> rhai::Array {
-                    let v = serde_json::to_value(get_strings_api(module)).unwrap_or(serde_json::Value::Array(vec![]));
-                    if let rhai::Dynamic::Array(a) = json_to_rhai(v) { a } else { rhai::Array::new() }
-                });
-                
-                // Execute the script
-                match engine.eval::<rhai::Dynamic>(&script) {
+                // Use the globally cached engine
+                match RHAI_ENGINE.eval::<Dynamic>(&script) {
                     Ok(result) => {
                         let result_str = format!("{:?}", result);
                         DbgResponse::ScriptResult(Ok(result_str))
@@ -336,5 +247,96 @@ pub extern "C" fn drain_task_queue_callback(_userdata: *mut c_void) {
         };
 
         let _ = task.responder.send(response);
+    }
+}
+
+// Global Rhai engine pre-initialized with all functions
+static RHAI_ENGINE: Lazy<Engine> = Lazy::new(|| {
+    let mut engine = Engine::new();
+    
+    // Safety: Limit the number of operations to prevent GUI freezing
+    engine.set_max_operations(100_000);
+    engine.register_fn("execute_command", |cmd: &str| -> bool {
+        execute_command_api(cmd)
+    });
+    engine.register_fn("log_print", |msg: &str| {
+        log_print(msg);
+    });
+    engine.register_fn("read_memory", |addr: i64, size: i64| -> Array {
+        if let Some(data) = read_memory_api(addr as duint, size as usize) {
+            data.into_iter().map(|b| (b as i64).into()).collect()
+        } else {
+            Array::new()
+        }
+    });
+    engine.register_fn("get_registers", || -> Map {
+        if let Some(reg_dump) = get_registers_api() {
+            let mut map = Map::new();
+            let regs = &reg_dump.regcontext;
+            map.insert("rax".into(), (regs.cax as i64).into());
+            map.insert("rbx".into(), (regs.cbx as i64).into());
+            map.insert("rcx".into(), (regs.ccx as i64).into());
+            map.insert("rdx".into(), (regs.cdx as i64).into());
+            map.insert("rsi".into(), (regs.csi as i64).into());
+            map.insert("rdi".into(), (regs.cdi as i64).into());
+            map.insert("rbp".into(), (regs.cbp as i64).into());
+            map.insert("rsp".into(), (regs.csp as i64).into());
+            map.insert("rip".into(), (regs.cip as i64).into());
+            map
+        } else {
+            Map::new()
+        }
+    });
+
+    engine.register_fn("get_breakpoints", || -> Array {
+        let v = serde_json::to_value(get_breakpoints_api()).unwrap_or(serde_json::Value::Array(vec![]));
+        if let Dynamic::Array(a) = json_to_rhai(v) { a } else { Array::new() }
+    });
+    engine.register_fn("get_modules", || -> Array {
+        let v = serde_json::to_value(get_modules_api()).unwrap_or(serde_json::Value::Array(vec![]));
+        if let Dynamic::Array(a) = json_to_rhai(v) { a } else { Array::new() }
+    });
+    engine.register_fn("get_threads", || -> Array {
+        let v = serde_json::to_value(get_threads_api()).unwrap_or(serde_json::Value::Array(vec![]));
+        if let Dynamic::Array(a) = json_to_rhai(v) { a } else { Array::new() }
+    });
+    engine.register_fn("get_call_stack", || -> Array {
+        let v = serde_json::to_value(get_call_stack_api()).unwrap_or(serde_json::Value::Array(vec![]));
+        if let Dynamic::Array(a) = json_to_rhai(v) { a } else { Array::new() }
+    });
+    engine.register_fn("get_symbols", |module: &str| -> Array {
+        let v = serde_json::to_value(get_symbols_api(module)).unwrap_or(serde_json::Value::Array(vec![]));
+        if let Dynamic::Array(a) = json_to_rhai(v) { a } else { Array::new() }
+    });
+    engine.register_fn("get_strings", |module: &str| -> Array {
+        let v = serde_json::to_value(get_strings_api(module)).unwrap_or(serde_json::Value::Array(vec![]));
+        if let Dynamic::Array(a) = json_to_rhai(v) { a } else { Array::new() }
+    });
+
+    engine
+});
+
+// Helper to convert serde_json to Rhai Dynamic
+fn json_to_rhai(v: serde_json::Value) -> Dynamic {
+    match v {
+        serde_json::Value::Null => Dynamic::UNIT,
+        serde_json::Value::Bool(b) => b.into(),
+        serde_json::Value::Number(n) => {
+            if let Some(i) = n.as_i64() { i.into() }
+            else if let Some(f) = n.as_f64() { f.into() }
+            else { Dynamic::UNIT }
+        },
+        serde_json::Value::String(s) => s.into(),
+        serde_json::Value::Array(a) => {
+            let arr: Array = a.into_iter().map(json_to_rhai).collect();
+            arr.into()
+        },
+        serde_json::Value::Object(o) => {
+            let mut map = Map::new();
+            for (k, v) in o {
+                map.insert(k.into(), json_to_rhai(v));
+            }
+            map.into()
+        }
     }
 }

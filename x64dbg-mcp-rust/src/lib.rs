@@ -26,7 +26,14 @@ pub extern "C" fn pluginit(init_struct: *mut PLUG_INITSTRUCT) -> bool {
         (*init_struct).pluginName[len] = 0;
     }
 
+    // Initialize tracing with x64dbg layer
+    use tracing_subscriber::prelude::*;
+    let _ = tracing_subscriber::registry()
+        .with(mcp::logger::X64DbgLogLayer)
+        .try_init();
+
     log_print("MCP Server (Rust) initialized!\n");
+    tracing::info!("Plugin initialized and tracing system started.");
 
     mcp::events::register_callbacks(unsafe { (*init_struct).pluginHandle });
 
@@ -52,5 +59,6 @@ pub extern "C" fn plugsetup(_setup_struct: *mut c_void) -> bool {
 #[no_mangle]
 pub extern "C" fn plugstop() -> bool {
     log_print("MCP Server (Rust) stopping...\n");
+    mcp::events::SHUTDOWN_TOKEN.cancel();
     true
 }

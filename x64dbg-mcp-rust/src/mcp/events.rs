@@ -1,11 +1,13 @@
 use serde_json::{json, Value};
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::Mutex;
 use once_cell::sync::Lazy;
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::ffi::c_void;
+use tokio_util::sync::CancellationToken;
 
 pub static PLUGIN_HANDLE: AtomicI32 = AtomicI32::new(0);
+pub static SHUTDOWN_TOKEN: Lazy<CancellationToken> = Lazy::new(CancellationToken::new);
 
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
@@ -26,38 +28,41 @@ extern "C" {
     );
 }
 
-pub static EVENT_RX: Lazy<Mutex<Option<UnboundedReceiver<Value>>>> = Lazy::new(|| Mutex::new(None));
+pub static EVENT_RX: Lazy<Mutex<Option<Receiver<Value>>>> = Lazy::new(|| Mutex::new(None));
 
-pub fn init_event_channel() -> UnboundedSender<Value> {
-    let (tx, rx) = unbounded_channel();
+pub fn init_event_channel() -> Sender<Value> {
+    let (tx, rx) = channel(1024); // Bounded channel to prevent OOM
     if let Ok(mut lock) = EVENT_RX.lock() {
         *lock = Some(rx);
     }
     tx
 }
 
-pub static EVENT_TX: Lazy<UnboundedSender<Value>> = Lazy::new(init_event_channel);
+pub static EVENT_TX: Lazy<Sender<Value>> = Lazy::new(init_event_channel);
+
+fn send_event(event: Value) {
+    // try_send to avoid blocking GUI thread
+    let _ = EVENT_TX.try_send(event);
+}
 
 pub extern "C" fn cb_system_breakpoint(_cb_type: CBTYPE, _info: *mut c_void) {
-    let _ = EVENT_TX.send(json!({ "event": "CB_SYSTEMBREAKPOINT", "message": "System Breakpoint hit" }));
+    send_event(json!({ "event": "CB_SYSTEMBREAKPOINT", "message": "System Breakpoint hit" }));
 }
 
 pub extern "C" fn cb_exception(_cb_type: CBTYPE, _info: *mut c_void) {
-    let _ = EVENT_TX.send(json!({ "event": "CB_EXCEPTION", "message": "Exception raised" }));
+    send_event(json!({ "event": "CB_EXCEPTION", "message": "Exception raised" }));
 }
 
 pub extern "C" fn cb_breakpoint(_cb_type: CBTYPE, _info: *mut c_void) {
-    let _ = EVENT_TX.send(json!({ "event": "CB_BREAKPOINT", "message": "Breakpoint hit" }));
+    send_event(json!({ "event": "CB_BREAKPOINT", "message": "Breakpoint hit" }));
 }
 
 pub extern "C" fn cb_pausedebug(_cb_type: CBTYPE, _info: *mut c_void) {
-    // Only send Pause notifications to not overwhelm the UI during fast stepping,
-    // actually, AI might want this.
-    let _ = EVENT_TX.send(json!({ "event": "CB_PAUSEDEBUG", "message": "Debugger paused" }));
+    send_event(json!({ "event": "CB_PAUSEDEBUG", "message": "Debugger paused" }));
 }
 
 pub extern "C" fn cb_stepped(_cb_type: CBTYPE, _info: *mut c_void) {
-    let _ = EVENT_TX.send(json!({ "event": "CB_STEPPED", "message": "Instruction stepped" }));
+    send_event(json!({ "event": "CB_STEPPED", "message": "Instruction stepped" }));
 }
 
 pub fn register_callbacks(handle: i32) {

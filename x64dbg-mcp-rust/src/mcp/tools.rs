@@ -62,7 +62,10 @@ pub async fn handle_read_memory(request: CallToolRequestParams) -> Result<CallTo
 
 pub async fn handle_get_registers(_request: CallToolRequestParams) -> Result<CallToolResult, ErrorData> {
     match dispatch_dbg_request(DbgRequest::GetRegisters).await? {
-        DbgResponse::Registers(Some(json_str)) => Ok(CallToolResult::success(vec![Content::text(json_str)])),
+        DbgResponse::Registers(Some(val)) => {
+            let json_str = serde_json::to_string_pretty(&val).unwrap_or_default();
+            Ok(CallToolResult::success(vec![Content::text(json_str)]))
+        },
         DbgResponse::Registers(None) => Ok(CallToolResult::error(vec![Content::text("Failed to get registers (Is the debugger stopped?)")])),
         _ => Err(ErrorData::internal_error("Unexpected response value", None))
     }
@@ -80,7 +83,10 @@ pub async fn handle_set_register(request: CallToolRequestParams) -> Result<CallT
 
 pub async fn handle_get_breakpoints(_request: CallToolRequestParams) -> Result<CallToolResult, ErrorData> {
     match dispatch_dbg_request(DbgRequest::GetBreakpoints).await? {
-        DbgResponse::Breakpoints(json) => Ok(CallToolResult::success(vec![Content::text(json)])),
+        DbgResponse::Breakpoints(v) => {
+            let json_str = serde_json::to_string_pretty(&v).unwrap_or_else(|_| "[]".to_string());
+            Ok(CallToolResult::success(vec![Content::text(json_str)]))
+        },
         _ => Err(ErrorData::internal_error("Unexpected response value", None))
     }
 }
@@ -97,21 +103,30 @@ pub async fn handle_set_breakpoint(request: CallToolRequestParams) -> Result<Cal
 
 pub async fn handle_get_threads(_request: CallToolRequestParams) -> Result<CallToolResult, ErrorData> {
     match dispatch_dbg_request(DbgRequest::GetThreads).await? {
-        DbgResponse::Threads(json) => Ok(CallToolResult::success(vec![Content::text(json)])),
+        DbgResponse::Threads(v) => {
+            let json_str = serde_json::to_string_pretty(&v).unwrap_or_else(|_| "[]".to_string());
+            Ok(CallToolResult::success(vec![Content::text(json_str)]))
+        },
         _ => Err(ErrorData::internal_error("Unexpected response value", None))
     }
 }
 
 pub async fn handle_get_modules(_request: CallToolRequestParams) -> Result<CallToolResult, ErrorData> {
     match dispatch_dbg_request(DbgRequest::GetModules).await? {
-        DbgResponse::Modules(json) => Ok(CallToolResult::success(vec![Content::text(json)])),
+        DbgResponse::Modules(v) => {
+            let json_str = serde_json::to_string_pretty(&v).unwrap_or_else(|_| "[]".to_string());
+            Ok(CallToolResult::success(vec![Content::text(json_str)]))
+        },
         _ => Err(ErrorData::internal_error("Unexpected response value", None))
     }
 }
 
 pub async fn handle_get_call_stack(_request: CallToolRequestParams) -> Result<CallToolResult, ErrorData> {
     match dispatch_dbg_request(DbgRequest::GetCallStack).await? {
-        DbgResponse::CallStack(json) => Ok(CallToolResult::success(vec![Content::text(json)])),
+        DbgResponse::CallStack(v) => {
+            let json_str = serde_json::to_string_pretty(&v).unwrap_or_else(|_| "[]".to_string());
+            Ok(CallToolResult::success(vec![Content::text(json_str)]))
+        },
         _ => Err(ErrorData::internal_error("Unexpected response value", None))
     }
 }
@@ -232,34 +247,37 @@ pub async fn handle_yara_scan_mem(request: CallToolRequestParams) -> Result<Call
     let response = dispatch_dbg_request(dbg_req).await?;
     
     if let DbgResponse::MemoryData(Some(data)) = response {
-        let mut compiler = boreal::Compiler::new();
-        match compiler.add_rules_str(&args.rule) {
-            Ok(_) => {
-                let scanner = compiler.finalize();
-                match scanner.scan_mem(&data) {
-                    Ok(scan_result) => {
-                        let mut matches = Vec::new();
-                        for r in scan_result.rules {
-                            for string_match in r.matches {
-                                for m in string_match.matches {
-                                    matches.push(format!("Rule '{}' matched at offset 0x{:X} within chunk", r.name, m.offset));
+        // CPU 집약적인 YARA 스캔을 블로킹 풀로 오프로드
+        let rule = args.rule.clone();
+        let scan_res = tokio::task::spawn_blocking(move || {
+            let mut compiler = boreal::Compiler::new();
+            match compiler.add_rules_str(&rule) {
+                Ok(_) => {
+                    let scanner = compiler.finalize();
+                    match scanner.scan_mem(&data) {
+                        Ok(scan_result) => {
+                            let mut matches = Vec::new();
+                            for r in scan_result.rules {
+                                for string_match in r.matches {
+                                    for m in string_match.matches {
+                                        matches.push(format!("Rule '{}' matched at offset 0x{:X} within chunk", r.name, m.offset));
+                                    }
                                 }
                             }
+                            if matches.is_empty() {
+                                Ok("No YARA rule matches found.".to_string())
+                            } else {
+                                Ok(matches.join("\n"))
+                            }
                         }
-                        
-                        if matches.is_empty() {
-                            Ok(CallToolResult::success(vec![Content::text("No YARA rule matches found.")]))
-                        } else {
-                            Ok(CallToolResult::success(vec![Content::text(matches.join("\n"))]))
-                        }
+                        Err(err) => Ok(format!("YARA scan error: {:?}", err)),
                     }
-                    Err(err) => Ok(CallToolResult::success(vec![Content::text(format!("YARA scan error: {:?}", err))])),
                 }
+                Err(e) => Ok(format!("Rule compilation failed: {:?}", e)),
             }
-            Err(e) => {
-                Ok(CallToolResult::success(vec![Content::text(format!("Rule compilation failed: {:?}", e))]))
-            }
-        }
+        }).await.map_err(|e| ErrorData::internal_error(e.to_string(), None))?;
+
+        Ok(CallToolResult::success(vec![Content::text(scan_res)]))
     } else {
         Err(ErrorData::internal_error("Failed to read memory for YARA scan", None))
     }
@@ -288,13 +306,15 @@ pub async fn handle_struct_dump_mem(request: CallToolRequestParams) -> Result<Ca
         .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
     let addr = parse_hex(&args.address)?;
     
-    let mut offset = 0;
+    // 계산 시 Alignment를 고려한 전체 크기 파악
+    let mut total_size = 0;
     for field in &args.fields {
-        offset += sizeof_type(&field.field_type);
+        let align = alignof_type(&field.field_type);
+        let padding = (align - (total_size % align)) % align;
+        total_size += padding + sizeof_type(&field.field_type);
     }
     
-    let size = offset;
-    let dbg_req = DbgRequest::ReadMemory { address: addr, size };
+    let dbg_req = DbgRequest::ReadMemory { address: addr, size: total_size };
     let response = dispatch_dbg_request(dbg_req).await?;
     
     if let DbgResponse::MemoryData(Some(data)) = response {
@@ -302,11 +322,17 @@ pub async fn handle_struct_dump_mem(request: CallToolRequestParams) -> Result<Ca
         let mut curr_offset = 0;
         
         for field in &args.fields {
+            let align = alignof_type(&field.field_type);
+            let padding = (align - (curr_offset % align)) % align;
+            curr_offset += padding;
+
             let field_size = sizeof_type(&field.field_type);
             if curr_offset + field_size > data.len() { break; }
+            
             let slice = &data[curr_offset..curr_offset + field_size];
             let parsed_val = parse_value(slice, &field.field_type);
             result_json.insert(field.name.clone(), parsed_val);
+            
             curr_offset += field_size;
         }
         
@@ -322,6 +348,19 @@ fn sizeof_type(t: &str) -> usize {
         if let Some(val_str) = t.split('[').nth(1).and_then(|s| s.strip_suffix(']')) {
             return val_str.parse().unwrap_or(1);
         }
+    }
+    match t {
+        "u8" | "i8" => 1,
+        "u16" | "i16" => 2,
+        "u32" | "i32" | "f32" => 4,
+        "u64" | "i64" | "f64" | "ptr" | "pointer" => 8,
+        _ => 4,
+    }
+}
+
+fn alignof_type(t: &str) -> usize {
+    if t.starts_with("char[") || t.starts_with("u8[") {
+        return 1;
     }
     match t {
         "u8" | "i8" => 1,
@@ -377,7 +416,10 @@ pub async fn handle_get_symbols(request: CallToolRequestParams) -> Result<CallTo
         .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
     
     match dispatch_dbg_request(DbgRequest::GetSymbols(args.module)).await? {
-        DbgResponse::Symbols(json) => Ok(CallToolResult::success(vec![Content::text(json)])),
+        DbgResponse::Symbols(v) => {
+            let json_str = serde_json::to_string(&v).unwrap_or_else(|_| "[]".to_string());
+            Ok(CallToolResult::success(vec![Content::text(json_str)]))
+        },
         _ => Err(ErrorData::internal_error("Unexpected response value", None))
     }
 }
@@ -387,7 +429,10 @@ pub async fn handle_get_strings(request: CallToolRequestParams) -> Result<CallTo
         .map_err(|e| ErrorData::invalid_params(e.to_string(), None))?;
     
     match dispatch_dbg_request(DbgRequest::GetStrings(args.module)).await? {
-        DbgResponse::Strings(json) => Ok(CallToolResult::success(vec![Content::text(json)])),
+        DbgResponse::Strings(v) => {
+            let json_str = serde_json::to_string(&v).unwrap_or_else(|_| "[]".to_string());
+            Ok(CallToolResult::success(vec![Content::text(json_str)]))
+        },
         _ => Err(ErrorData::internal_error("Unexpected response value", None))
     }
 }

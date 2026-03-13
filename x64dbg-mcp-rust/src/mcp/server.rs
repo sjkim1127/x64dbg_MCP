@@ -416,14 +416,33 @@ impl ServerHandler for X64DbgMcpServer {
 
 #[tokio::main]
 pub async fn start_mcp_server() {
-    log_print("Starting MCP server listener on http://127.0.0.1:50301/mcp/sse ...\n");
+    let port = std::env::var("X64DBG_MCP_PORT")
+        .ok()
+        .and_then(|p| p.parse::<u16>().ok())
+        .unwrap_or(50301);
+    let bind_addr = format!("127.0.0.1:{}", port);
+    log_print(&format!("Starting MCP server listener on http://{} ...\n", bind_addr));
     
+    let shutdown_token = super::events::SHUTDOWN_TOKEN.clone();
+
     // Start background event loop for sending notifications to all peers
     if let Ok(mut lock) = super::events::EVENT_RX.lock() {
         if let Some(mut rx) = lock.take() {
+            let loop_shutdown = shutdown_token.clone();
             tokio::spawn(async move {
-                while let Some(event) = rx.recv().await {
-                    broadcast_event(LoggingLevel::Info, event).await;
+                loop {
+                    tokio::select! {
+                        event = rx.recv() => {
+                            if let Some(event) = event {
+                                broadcast_event(LoggingLevel::Info, event).await;
+                            } else {
+                                break;
+                            }
+                        }
+                        _ = loop_shutdown.cancelled() => {
+                            break;
+                        }
+                    }
                 }
             });
         }
@@ -444,9 +463,14 @@ pub async fn start_mcp_server() {
     let router = axum::Router::new().nest_service("/mcp", service);
     let bind_addr = "127.0.0.1:50301";
     
+    let server_shutdown = shutdown_token.clone();
     match tokio::net::TcpListener::bind(bind_addr).await {
         Ok(listener) => {
-            if let Err(e) = axum::serve(listener, router).await {
+            let server = axum::serve(listener, router)
+                .with_graceful_shutdown(async move {
+                    server_shutdown.cancelled().await;
+                });
+            if let Err(e) = server.await {
                 log_print(&format!("MCP Server Error: {}\n", e));
             }
         }
@@ -454,4 +478,5 @@ pub async fn start_mcp_server() {
             log_print(&format!("Failed to bind to {}: {}\n", bind_addr, e));
         }
     }
+    log_print("MCP Server background thread exiting.\n");
 }

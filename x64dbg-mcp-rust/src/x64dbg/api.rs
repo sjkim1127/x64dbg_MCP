@@ -43,90 +43,102 @@ pub fn get_registers_api() -> Option<REGDUMP_AVX512> {
     }
 }
 
-pub fn get_breakpoints_api() -> Vec<serde_json::Value> {
-    let mut bp_map = unsafe { std::mem::zeroed::<BPMAP>() };
-    let count = unsafe { DbgGetBpList(BPXTYPE_bp_normal, &mut bp_map) };
-    
-    let mut bplist = Vec::new();
-    if count > 0 && !bp_map.bp.is_null() {
-        for i in 0..count {
-            let bp = unsafe { *bp_map.bp.add(i as usize) };
-            bplist.push(serde_json::json!({
-                "address": format!("0x{:X}", bp.addr),
-                "enabled": bp.enabled,
-                "name": if bp.name.as_ptr().is_null() { String::new() } else { unsafe { CStr::from_ptr(bp.name.as_ptr()).to_string_lossy().into_owned() } },
-                "hit_count": bp.hitCount
-            }));
+// RAII 래퍼: 스코프 종료 시 자동으로 BridgeFree 호출
+struct BridgeMemoryGuard(*mut c_void);
+impl Drop for BridgeMemoryGuard {
+    fn drop(&mut self) {
+        if !self.0.is_null() {
+            unsafe { BridgeFree(self.0) };
         }
-        unsafe { BridgeFree(bp_map.bp as *mut c_void) };
     }
-    bplist
 }
 
-pub fn get_threads_api() -> Vec<serde_json::Value> {
-    let mut thread_list = unsafe { std::mem::zeroed::<THREADLIST>() };
-    unsafe { DbgGetThreadList(&mut thread_list) };
-    
-    let mut tlist = Vec::new();
-    if thread_list.count > 0 && !thread_list.list.is_null() {
-        for i in 0..thread_list.count {
-            let t = unsafe { *thread_list.list.add(i as usize) };
-            tlist.push(serde_json::json!({
-                "id": t.BasicInfo.ThreadId,
-                "address": format!("0x{:X}", t.BasicInfo.ThreadStartAddress),
-                "name": if t.BasicInfo.threadName.as_ptr().is_null() { String::new() } else { unsafe { CStr::from_ptr(t.BasicInfo.threadName.as_ptr()).to_string_lossy().into_owned() } }
-            }));
-        }
-        unsafe { BridgeFree(thread_list.list as *mut c_void) };
-    }
-    tlist
+// Helper to access DbgFunctions safely
+fn dbg_functions() -> &'static DBGFUNCTIONS {
+    unsafe { &*DbgFunctions() }
 }
 
-pub fn get_modules_api() -> Vec<serde_json::Value> {
-    let mut mem_map = unsafe { std::mem::zeroed::<MEMMAP>() };
-    let success = unsafe { DbgMemMap(&mut mem_map) };
-    
-    let mut mlist = Vec::new();
-    let mut seen_bases = HashSet::new();
-    
-    if success && mem_map.count > 0 && !mem_map.page.is_null() {
-        for i in 0..mem_map.count {
-            let page = unsafe { *mem_map.page.add(i as usize) };
-            let base = page.mbi.AllocationBase as usize;
-            if page.mbi.Type == MEM_IMAGE_VAL && !seen_bases.contains(&base) {
-                let name = if page.info.as_ptr().is_null() { String::new() } else { unsafe { CStr::from_ptr(page.info.as_ptr()).to_string_lossy().into_owned() } };
-                if !name.is_empty() {
-                    mlist.push(serde_json::json!({
-                        "base": format!("0x{:X}", base),
-                        "name": name
+pub fn get_breakpoints_api() -> Vec<serde_json::Value> { // Changed to serde_json::Value to match original return type
+    let mut bplist = unsafe { std::mem::zeroed::<BPMAP>() };
+    let count = unsafe { DbgGetBplist(BPXTYPE::bp_none, &mut bplist) }; // Changed to DbgGetBplist and BPXTYPE::bp_none as per instruction
+    let mut breakpoints = Vec::new();
+
+    if count > 0 && !bplist.list.is_null() {
+        let _guard = BridgeMemoryGuard(bplist.list as *mut c_void);
+        let entries = unsafe { std::slice::from_raw_parts(bplist.list, count as usize) };
+        for entry in entries {
+            breakpoints.push(serde_json::json!({ // Changed to serde_json::json! to match original return type
+                "address": format!("0x{:X}", entry.addr),
+                "enabled": entry.enabled,
+                "type_name": format!("{:?}", entry.type_), // Added type_name as per instruction
+            }));
+        }
+    }
+    breakpoints
+}
+
+pub fn get_threads_api() -> Vec<serde_json::Value> { // Changed to serde_json::Value to match original return type
+    let mut tlist = unsafe { std::mem::zeroed::<THREADLIST>() };
+    unsafe { DbgGetThreadList(&mut tlist) };
+    let mut threads = Vec::new();
+
+    if tlist.count > 0 && !tlist.list.is_null() {
+        let _guard = BridgeMemoryGuard(tlist.list as *mut c_void);
+        let entries = unsafe { std::slice::from_raw_parts(tlist.list, tlist.count as usize) };
+        for entry in entries {
+            threads.push(serde_json::json!({ // Changed to serde_json::json! to match original return type
+                "handle": format!("0x{:X}", entry.Handle as usize),
+                "id": entry.ThreadId,
+                "cip": format!("0x{:X}", entry.ThreadCip),
+                "wait_reason": entry.WaitReason,
+            }));
+        }
+    }
+    threads
+}
+
+pub fn get_modules_api() -> Vec<serde_json::Value> { // Changed to serde_json::Value to match original return type
+    let mut mmap = unsafe { std::mem::zeroed::<MEMMAP>() };
+    if unsafe { DbgMemMap(&mut mmap) } {
+        let mut modules = Vec::new();
+        if mmap.count > 0 && !mmap.page.is_null() {
+            let _guard = BridgeMemoryGuard(mmap.page as *mut c_void);
+            let pages = unsafe { std::slice::from_raw_parts(mmap.page, mmap.count as usize) };
+            for page in pages {
+                let info = unsafe { CStr::from_ptr(page.info.as_ptr()).to_string_lossy().into_owned() };
+                if !info.is_empty() {
+                    modules.push(serde_json::json!({ // Changed to serde_json::json! to match original return type
+                        "base": format!("0x{:X}", page.mbi.BaseAddress as usize),
+                        "size": format!("0x{:X}", page.mbi.RegionSize as usize),
+                        "name": info,
                     }));
-                    seen_bases.insert(base);
                 }
             }
         }
-        unsafe { BridgeFree(mem_map.page as *mut c_void) };
+        modules
+    } else {
+        Vec::new()
     }
-    mlist
 }
 
-pub fn get_call_stack_api() -> Vec<serde_json::Value> {
-    let mut call_stack = unsafe { std::mem::zeroed::<DBGCALLSTACK>() };
-    unsafe { (*DbgFunctions()).GetCallStack.unwrap()(&mut call_stack) };
-    
-    let mut cs_list = Vec::new();
-    if call_stack.total > 0 && !call_stack.entries.is_null() {
-        for i in 0..call_stack.total {
-            let entry = unsafe { *call_stack.entries.add(i as usize) };
-            cs_list.push(serde_json::json!({
+pub fn get_call_stack_api() -> Vec<serde_json::Value> { // Changed to serde_json::Value to match original return type
+    let mut cs = unsafe { std::mem::zeroed::<DBGCALLSTACK>() };
+    unsafe { dbg_functions().GetCallStack.unwrap()(&mut cs) };
+    let mut entries = Vec::new();
+
+    if cs.total > 0 && !cs.entries.is_null() {
+        let _guard = BridgeMemoryGuard(cs.entries as *mut c_void);
+        let stack_entries = unsafe { std::slice::from_raw_parts(cs.entries, cs.total as usize) };
+        for entry in stack_entries {
+            entries.push(serde_json::json!({ // Changed to serde_json::json! to match original return type
                 "address": format!("0x{:X}", entry.addr),
                 "from": format!("0x{:X}", entry.from),
                 "to": format!("0x{:X}", entry.to),
-                "comment": if entry.comment.as_ptr().is_null() { String::new() } else { unsafe { CStr::from_ptr(entry.comment.as_ptr()).to_string_lossy().into_owned() } }
+                "comment": unsafe { CStr::from_ptr(entry.comment.as_ptr()).to_string_lossy().into_owned() },
             }));
         }
-        unsafe { BridgeFree(call_stack.entries as *mut c_void) };
     }
-    cs_list
+    entries
 }
 
 pub fn set_comment_at_api(addr: duint, text: &str) -> bool {
@@ -196,10 +208,9 @@ pub fn get_symbols_api(module_name: &str) -> Vec<serde_json::Value> {
 
 pub fn get_strings_api(module_name: &str) -> Vec<serde_json::Value> {
     let base = if module_name == "*" {
-        // For simplicity, let's just use current CIP module if '*' is specified but not handled globally
         let regs = get_registers_api();
         if let Some(r) = regs {
-            unsafe { (*DbgFunctions()).ModBaseFromAddr.unwrap()(r.regcontext.cip) }
+            unsafe { dbg_functions().ModBaseFromAddr.unwrap()(r.regcontext.cip) }
         } else {
             0
         }
@@ -213,29 +224,42 @@ pub fn get_strings_api(module_name: &str) -> Vec<serde_json::Value> {
     }
 
     // Get module size
-    let mut size: duint = 0;
-    unsafe { size = (*DbgFunctions()).ModSizeFromAddr.unwrap()(base); }
+    let size = unsafe { dbg_functions().ModSizeFromAddr.unwrap()(base) };
     if size == 0 { return Vec::new(); }
 
     let mut strings = Vec::new();
-    let chunk_size = 0x1000;
+    let chunk_size = 0x10000; // 64KB chunks
     
-    // We iterate through the module memory and look for string references
-    // This is a simplified version of what 'strref' does.
-    // In x64dbg, DbgGetStringAt is often used to check if an address points to a string.
-    
-    for addr in (base..base + size).step_by(8) { // Step by pointer size for speed
-        let mut string_buf = vec![0i8; 512];
-        if unsafe { DbgGetStringAt(addr, string_buf.as_mut_ptr()) } {
-            let string_val = unsafe { CStr::from_ptr(string_buf.as_ptr()).to_string_lossy().into_owned() };
-            if !string_val.trim().is_empty() {
-                strings.push(serde_json::json!({
-                    "address": format!("0x{:X}", addr),
-                    "content": string_val
-                }));
+    // Performance optimization: Read module in chunks and scan in Rust
+    for current_addr in (base..base + size).step_by(chunk_size as usize) { // Cast chunk_size to usize
+        let read_len = std::cmp::min(chunk_size, (base + size) - current_addr) as usize; // Cast to usize
+        if let Some(buffer) = read_memory_api(current_addr, read_len) {
+            let mut start = 0;
+            while start < buffer.len() {
+                // Look for start of a string (printable characters)
+                if buffer[start] >= 0x20 && buffer[start] <= 0x7E {
+                    let mut end = start + 1;
+                    while end < buffer.len() && buffer[end] >= 0x20 && buffer[end] <= 0x7E {
+                        end += 1;
+                    }
+                    
+                    // Found a printable sequence, check length
+                    if end - start >= 4 {
+                        if let Ok(content) = std::str::from_utf8(&buffer[start..end]) {
+                            strings.push(serde_json::json!({
+                                "address": format!("0x{:X}", current_addr + start as duint), // Cast start to duint
+                                "content": content.to_string()
+                            }));
+                        }
+                    }
+                    start = end;
+                } else {
+                    start += 1;
+                }
+                
+                if strings.len() >= 1000 { break; }
             }
         }
-        // Limit to 1000 strings to prevent overwhelming the AI
         if strings.len() >= 1000 { break; }
     }
 
