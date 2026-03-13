@@ -3,12 +3,12 @@ use std::path::PathBuf;
 
 fn main() {
     println!("cargo:rerun-if-changed=wrapper.h");
-    
+
     // We only link to x64bridge.lib and x64dbg.lib or x32bridge.lib and x32dbg.lib
     // For simplicity, we assume building for 64-bit first
     let sdk_path = std::fs::canonicalize("../vendor/x64dbg-pluginsdk").unwrap();
     println!("cargo:rustc-link-search=native={}", sdk_path.display());
-    
+
     if cfg!(target_pointer_width = "64") {
         println!("cargo:rustc-link-lib=x64bridge");
         println!("cargo:rustc-link-lib=x64dbg");

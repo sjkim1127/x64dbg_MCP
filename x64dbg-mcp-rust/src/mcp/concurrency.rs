@@ -1,12 +1,12 @@
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use once_cell::sync::Lazy;
+use rhai::{Array, Dynamic, Engine, Map};
 use std::os::raw::c_void;
-use tokio::sync::oneshot;
-use rhai::{Engine, Dynamic, Array, Map};
 use std::sync::OnceLock;
+use tokio::sync::oneshot;
 
-use crate::x64dbg::api::*;
 use crate::mcp::types::*;
+use crate::x64dbg::api::*;
 
 pub enum DbgRequest {
     ExecuteCommand(String),
@@ -22,8 +22,8 @@ pub enum DbgRequest {
     SetLabel { address: usize, text: String },
     MemoryIsValidPtr(usize),
     AnalyzeFunction(usize),
-    GetSymbols(String), // module name
-    GetStrings(String), // module name
+    GetSymbols(String),    // module name
+    GetStrings(String),    // module name
     ExecuteScript(String), // Rhai script content
     GetXrefs(usize),
     GetMemoryMapFull,
@@ -99,18 +99,27 @@ pub extern "C" fn drain_task_queue_callback(_userdata: *mut c_void) {
                     reg_map.insert("rbp".into(), serde_json::json!(format!("0x{:X}", regs.cbp)));
                     reg_map.insert("rsp".into(), serde_json::json!(format!("0x{:X}", regs.csp)));
                     reg_map.insert("rip".into(), serde_json::json!(format!("0x{:X}", regs.cip)));
-                    reg_map.insert("eflags".into(), serde_json::json!(format!("0x{:X}", regs.eflags)));
+                    reg_map.insert(
+                        "eflags".into(),
+                        serde_json::json!(format!("0x{:X}", regs.eflags)),
+                    );
 
                     #[cfg(target_pointer_width = "64")]
                     {
                         reg_map.insert("r8".into(), serde_json::json!(format!("0x{:X}", regs.r8)));
                         reg_map.insert("r9".into(), serde_json::json!(format!("0x{:X}", regs.r9)));
-                        reg_map.insert("r10".into(), serde_json::json!(format!("0x{:X}", regs.r10)));
-                        reg_map.insert("r11".into(), serde_json::json!(format!("0x{:X}", regs.r11)));
-                        reg_map.insert("r12".into(), serde_json::json!(format!("0x{:X}", regs.r12)));
-                        reg_map.insert("r13".into(), serde_json::json!(format!("0x{:X}", regs.r13)));
-                        reg_map.insert("r14".into(), serde_json::json!(format!("0x{:X}", regs.r14)));
-                        reg_map.insert("r15".into(), serde_json::json!(format!("0x{:X}", regs.r15)));
+                        reg_map
+                            .insert("r10".into(), serde_json::json!(format!("0x{:X}", regs.r10)));
+                        reg_map
+                            .insert("r11".into(), serde_json::json!(format!("0x{:X}", regs.r11)));
+                        reg_map
+                            .insert("r12".into(), serde_json::json!(format!("0x{:X}", regs.r12)));
+                        reg_map
+                            .insert("r13".into(), serde_json::json!(format!("0x{:X}", regs.r13)));
+                        reg_map
+                            .insert("r14".into(), serde_json::json!(format!("0x{:X}", regs.r14)));
+                        reg_map
+                            .insert("r15".into(), serde_json::json!(format!("0x{:X}", regs.r15)));
                     }
                     Some(serde_json::Value::Object(reg_map))
                 } else {
@@ -123,23 +132,15 @@ pub extern "C" fn drain_task_queue_callback(_userdata: *mut c_void) {
                 let result = execute_command_api(&cmd);
                 DbgResponse::CommandSuccess(result)
             }
-            DbgRequest::GetBreakpoints => {
-                DbgResponse::Breakpoints(get_breakpoints_api())
-            }
+            DbgRequest::GetBreakpoints => DbgResponse::Breakpoints(get_breakpoints_api()),
             DbgRequest::SetBreakpoint(addr) => {
                 let cmd = format!("bp {}", addr);
                 let result = execute_command_api(&cmd);
                 DbgResponse::CommandSuccess(result)
             }
-            DbgRequest::GetThreads => {
-                DbgResponse::Threads(get_threads_api())
-            }
-            DbgRequest::GetModules => {
-                DbgResponse::Modules(get_modules_api())
-            }
-            DbgRequest::GetCallStack => {
-                DbgResponse::CallStack(get_call_stack_api())
-            }
+            DbgRequest::GetThreads => DbgResponse::Threads(get_threads_api()),
+            DbgRequest::GetModules => DbgResponse::Modules(get_modules_api()),
+            DbgRequest::GetCallStack => DbgResponse::CallStack(get_call_stack_api()),
             DbgRequest::SetComment { address, text } => {
                 let result = set_comment_at_api(address, &text);
                 DbgResponse::CommandSuccess(result)
@@ -155,31 +156,36 @@ pub extern "C" fn drain_task_queue_callback(_userdata: *mut c_void) {
             DbgRequest::AnalyzeFunction(entry) => {
                 let mut f_start: duint = 0;
                 let mut f_end: duint = 0;
-                let boundary_success = unsafe { DbgFunctionGet(entry as duint, &mut f_start, &mut f_end) };
+                let boundary_success =
+                    unsafe { DbgFunctionGet(entry as duint, &mut f_start, &mut f_end) };
 
                 let mut graph = unsafe { std::mem::zeroed::<BridgeCFGraphList>() };
                 let success = unsafe { DbgAnalyzeFunction(entry as duint, &mut graph) };
-                
+
                 if success {
                     let mut nodes = Vec::new();
                     let node_ptr = graph.nodes.data as *const BridgeCFNodeList;
                     let node_count = graph.nodes.count as usize;
-                    
+
                     let mut xrefs = Vec::new();
                     for i in 0..node_count {
                         let node = unsafe { &*node_ptr.add(i) };
-                        
+
                         let mut instructions = Vec::new();
                         let instr_ptr = node.instrs.data as *const BridgeCFInstruction;
                         let instr_count = node.instrs.count as usize;
                         for j in 0..instr_count {
                             let instr = unsafe { &*instr_ptr.add(j) };
-                            
+
                             // Try to get string reference at this instruction
                             use std::ffi::CStr;
                             let mut string_buf = vec![0i8; 512];
                             if unsafe { DbgGetStringAt(instr.addr, string_buf.as_mut_ptr()) } {
-                                let string_val = unsafe { CStr::from_ptr(string_buf.as_ptr()).to_string_lossy().into_owned() };
+                                let string_val = unsafe {
+                                    CStr::from_ptr(string_buf.as_ptr())
+                                        .to_string_lossy()
+                                        .into_owned()
+                                };
                                 if !string_val.is_empty() {
                                     xrefs.push(XRefInfo {
                                         address: format!("0x{:X}", instr.addr),
@@ -191,10 +197,15 @@ pub extern "C" fn drain_task_queue_callback(_userdata: *mut c_void) {
 
                             instructions.push(CFGInstruction {
                                 address: format!("0x{:X}", instr.addr),
-                                bytes: instr.data.iter().map(|b| format!("{:02X}", b)).collect::<Vec<String>>().join(""),
+                                bytes: instr
+                                    .data
+                                    .iter()
+                                    .map(|b| format!("{:02X}", b))
+                                    .collect::<Vec<String>>()
+                                    .join(""),
                             });
                         }
-                        
+
                         let mut exits = Vec::new();
                         let exit_ptr = node.exits.data as *const duint;
                         let exit_count = node.exits.count as usize;
@@ -202,7 +213,7 @@ pub extern "C" fn drain_task_queue_callback(_userdata: *mut c_void) {
                             let exit_addr = unsafe { *exit_ptr.add(k) };
                             exits.push(format!("0x{:X}", exit_addr));
                         }
-                        
+
                         nodes.push(CFGNode {
                             start: format!("0x{:X}", node.start),
                             end: format!("0x{:X}", node.end),
@@ -216,21 +227,34 @@ pub extern "C" fn drain_task_queue_callback(_userdata: *mut c_void) {
                             exits,
                         });
                     }
-                    
+
                     // Cleanup
                     for i in 0..node_count {
                         let node = unsafe { &*node_ptr.add(i) };
                         unsafe {
-                            if !node.exits.data.is_null() { BridgeFree(node.exits.data); }
-                            if !node.instrs.data.is_null() { BridgeFree(node.instrs.data); }
+                            if !node.exits.data.is_null() {
+                                BridgeFree(node.exits.data);
+                            }
+                            if !node.instrs.data.is_null() {
+                                BridgeFree(node.instrs.data);
+                            }
                         }
                     }
                     unsafe {
-                        if !graph.nodes.data.is_null() { BridgeFree(graph.nodes.data); }
+                        if !graph.nodes.data.is_null() {
+                            BridgeFree(graph.nodes.data);
+                        }
                     }
 
                     DbgResponse::FunctionAnalysis(Some(AnalyzeFunctionResult {
-                        start: format!("0x{:X}", if boundary_success { f_start } else { entry as duint }),
+                        start: format!(
+                            "0x{:X}",
+                            if boundary_success {
+                                f_start
+                            } else {
+                                entry as duint
+                            }
+                        ),
                         end: format!("0x{:X}", if boundary_success { f_end } else { 0 }),
                         entry_point: format!("0x{:X}", graph.entryPoint),
                         nodes,
@@ -240,52 +264,32 @@ pub extern "C" fn drain_task_queue_callback(_userdata: *mut c_void) {
                     DbgResponse::FunctionAnalysis(None)
                 }
             }
-            DbgRequest::GetSymbols(module) => {
-                DbgResponse::Symbols(get_symbols_api(&module))
-            }
-            DbgRequest::GetStrings(module) => {
-                DbgResponse::Strings(get_strings_api(&module))
-            }
+            DbgRequest::GetSymbols(module) => DbgResponse::Symbols(get_symbols_api(&module)),
+            DbgRequest::GetStrings(module) => DbgResponse::Strings(get_strings_api(&module)),
             DbgRequest::ExecuteScript(script) => {
                 // Use the globally cached engine
                 match RHAI_ENGINE.eval::<Dynamic>(&script) {
                     Ok(result) => {
                         let result_str = format!("{:?}", result);
                         DbgResponse::ScriptResult(Ok(result_str))
-                    },
+                    }
                     Err(e) => DbgResponse::ScriptResult(Err(e.to_string())),
                 }
             }
-            DbgRequest::GetXrefs(addr) => {
-                DbgResponse::GenericList(get_xrefs_api(addr as duint))
-            }
-            DbgRequest::GetMemoryMapFull => {
-                DbgResponse::GenericList(get_memory_map_full_api())
-            }
+            DbgRequest::GetXrefs(addr) => DbgResponse::GenericList(get_xrefs_api(addr as duint)),
+            DbgRequest::GetMemoryMapFull => DbgResponse::GenericList(get_memory_map_full_api()),
             DbgRequest::DisassembleRange { address, count } => {
                 DbgResponse::GenericList(disassemble_range_api(address as duint, count))
             }
             DbgRequest::Bookmark { address, is_set } => {
                 DbgResponse::Boolean(bookmark_api(address as duint, is_set))
             }
-            DbgRequest::GetPebTeb => {
-                DbgResponse::GenericValue(get_peb_teb_api())
-            }
-            DbgRequest::GetTcpConnections => {
-                DbgResponse::GenericList(get_tcp_connections_api())
-            }
-            DbgRequest::GetHandles => {
-                DbgResponse::GenericList(get_handles_api())
-            }
-            DbgRequest::GetPatches => {
-                DbgResponse::GenericList(get_patches_api())
-            }
-            DbgRequest::GetHeaps => {
-                DbgResponse::GenericList(get_heaps_api())
-            }
-            DbgRequest::GetWindows => {
-                DbgResponse::GenericList(get_windows_api())
-            }
+            DbgRequest::GetPebTeb => DbgResponse::GenericValue(get_peb_teb_api()),
+            DbgRequest::GetTcpConnections => DbgResponse::GenericList(get_tcp_connections_api()),
+            DbgRequest::GetHandles => DbgResponse::GenericList(get_handles_api()),
+            DbgRequest::GetPatches => DbgResponse::GenericList(get_patches_api()),
+            DbgRequest::GetHeaps => DbgResponse::GenericList(get_heaps_api()),
+            DbgRequest::GetWindows => DbgResponse::GenericList(get_windows_api()),
         };
 
         let _ = task.responder.send(response);
@@ -295,7 +299,7 @@ pub extern "C" fn drain_task_queue_callback(_userdata: *mut c_void) {
 // Global Rhai engine pre-initialized with all functions
 static RHAI_ENGINE: Lazy<Engine> = Lazy::new(|| {
     let mut engine = Engine::new();
-    
+
     // Safety: Limit the number of operations to prevent GUI freezing
     engine.set_max_operations(100_000);
     engine.register_fn("execute_command", |cmd: &str| -> bool {
@@ -331,28 +335,56 @@ static RHAI_ENGINE: Lazy<Engine> = Lazy::new(|| {
     });
 
     engine.register_fn("get_breakpoints", || -> Array {
-        let v = serde_json::to_value(get_breakpoints_api()).unwrap_or(serde_json::Value::Array(vec![]));
-        if let Dynamic::Array(a) = json_to_rhai(v) { a } else { Array::new() }
+        let v =
+            serde_json::to_value(get_breakpoints_api()).unwrap_or(serde_json::Value::Array(vec![]));
+        if let Dynamic::Array(a) = json_to_rhai(v) {
+            a
+        } else {
+            Array::new()
+        }
     });
     engine.register_fn("get_modules", || -> Array {
         let v = serde_json::to_value(get_modules_api()).unwrap_or(serde_json::Value::Array(vec![]));
-        if let Dynamic::Array(a) = json_to_rhai(v) { a } else { Array::new() }
+        if let Dynamic::Array(a) = json_to_rhai(v) {
+            a
+        } else {
+            Array::new()
+        }
     });
     engine.register_fn("get_threads", || -> Array {
         let v = serde_json::to_value(get_threads_api()).unwrap_or(serde_json::Value::Array(vec![]));
-        if let Dynamic::Array(a) = json_to_rhai(v) { a } else { Array::new() }
+        if let Dynamic::Array(a) = json_to_rhai(v) {
+            a
+        } else {
+            Array::new()
+        }
     });
     engine.register_fn("get_call_stack", || -> Array {
-        let v = serde_json::to_value(get_call_stack_api()).unwrap_or(serde_json::Value::Array(vec![]));
-        if let Dynamic::Array(a) = json_to_rhai(v) { a } else { Array::new() }
+        let v =
+            serde_json::to_value(get_call_stack_api()).unwrap_or(serde_json::Value::Array(vec![]));
+        if let Dynamic::Array(a) = json_to_rhai(v) {
+            a
+        } else {
+            Array::new()
+        }
     });
     engine.register_fn("get_symbols", |module: &str| -> Array {
-        let v = serde_json::to_value(get_symbols_api(module)).unwrap_or(serde_json::Value::Array(vec![]));
-        if let Dynamic::Array(a) = json_to_rhai(v) { a } else { Array::new() }
+        let v = serde_json::to_value(get_symbols_api(module))
+            .unwrap_or(serde_json::Value::Array(vec![]));
+        if let Dynamic::Array(a) = json_to_rhai(v) {
+            a
+        } else {
+            Array::new()
+        }
     });
     engine.register_fn("get_strings", |module: &str| -> Array {
-        let v = serde_json::to_value(get_strings_api(module)).unwrap_or(serde_json::Value::Array(vec![]));
-        if let Dynamic::Array(a) = json_to_rhai(v) { a } else { Array::new() }
+        let v = serde_json::to_value(get_strings_api(module))
+            .unwrap_or(serde_json::Value::Array(vec![]));
+        if let Dynamic::Array(a) = json_to_rhai(v) {
+            a
+        } else {
+            Array::new()
+        }
     });
 
     engine
@@ -364,15 +396,19 @@ fn json_to_rhai(v: serde_json::Value) -> Dynamic {
         serde_json::Value::Null => Dynamic::UNIT,
         serde_json::Value::Bool(b) => b.into(),
         serde_json::Value::Number(n) => {
-            if let Some(i) = n.as_i64() { i.into() }
-            else if let Some(f) = n.as_f64() { f.into() }
-            else { Dynamic::UNIT }
-        },
+            if let Some(i) = n.as_i64() {
+                i.into()
+            } else if let Some(f) = n.as_f64() {
+                f.into()
+            } else {
+                Dynamic::UNIT
+            }
+        }
         serde_json::Value::String(s) => s.into(),
         serde_json::Value::Array(a) => {
             let arr: Array = a.into_iter().map(json_to_rhai).collect();
             arr.into()
-        },
+        }
         serde_json::Value::Object(o) => {
             let mut map = Map::new();
             for (k, v) in o {

@@ -1,8 +1,8 @@
 use super::*;
-use std::ffi::{CStr, CString};
-use std::os::raw::{c_void, c_char};
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
-use serde::{Serialize, Deserialize};
+use std::ffi::{CStr, CString};
+use std::os::raw::{c_char, c_void};
 
 #[repr(C)]
 pub struct ListInfo {
@@ -98,7 +98,15 @@ pub struct DBGFUNCTIONS {
     pub GetProcessList: Option<extern "C" fn(entries: *mut *mut c_void, count: *mut i32)>,
     pub _padding2: [Option<extern "C" fn()>; 10],
     pub EnumHandles: Option<extern "C" fn(handles: *mut ListInfo) -> bool>,
-    pub GetHandleName: Option<extern "C" fn(handle: duint, name: *mut c_char, nameSize: usize, typeName: *mut c_char, typeNameSize: usize) -> bool>,
+    pub GetHandleName: Option<
+        extern "C" fn(
+            handle: duint,
+            name: *mut c_char,
+            nameSize: usize,
+            typeName: *mut c_char,
+            typeNameSize: usize,
+        ) -> bool,
+    >,
     pub EnumTcpConnections: Option<extern "C" fn(connections: *mut ListInfo) -> bool>,
     pub _padding3: [Option<extern "C" fn()>; 7],
     pub EnumWindows: Option<extern "C" fn(windows: *mut ListInfo) -> bool>,
@@ -139,7 +147,11 @@ extern "C" {
     pub fn DbgGetTebAddress(thread_id: u32) -> duint;
     pub fn DbgGetProcessId() -> u32;
     pub fn DbgGetThreadId() -> u32;
-    pub fn DbgSymbolEnum(base: duint, cb: Option<extern "C" fn(*const c_void, *mut c_void) -> bool>, user: *mut c_void) -> bool;
+    pub fn DbgSymbolEnum(
+        base: duint,
+        cb: Option<extern "C" fn(*const c_void, *mut c_void) -> bool>,
+        user: *mut c_void,
+    ) -> bool;
     pub fn BridgeFree(ptr: *mut c_void);
     pub fn DbgGetSymbolInfo(symbol: *const c_void, info: *mut SYMBOLINFO);
     pub fn DbgModBaseFromName(name: *const c_char) -> duint;
@@ -182,9 +194,7 @@ pub fn execute_command_api(cmd: &str) -> bool {
 
 pub fn read_memory_api(addr: duint, size: usize) -> Option<Vec<u8>> {
     let mut buffer = vec![0u8; size];
-    let success = unsafe {
-        DbgMemRead(addr, buffer.as_mut_ptr() as *mut c_void, size as duint)
-    };
+    let success = unsafe { DbgMemRead(addr, buffer.as_mut_ptr() as *mut c_void, size as duint) };
     if success {
         Some(buffer)
     } else {
@@ -217,7 +227,8 @@ fn dbg_functions() -> &'static DBGFUNCTIONS {
     unsafe { &*DbgFunctions() }
 }
 
-pub fn get_breakpoints_api() -> Vec<serde_json::Value> { // Changed to serde_json::Value to match original return type
+pub fn get_breakpoints_api() -> Vec<serde_json::Value> {
+    // Changed to serde_json::Value to match original return type
     let mut bplist = unsafe { std::mem::zeroed::<BPMAP>() };
     let count = unsafe { DbgGetBplist(BPXTYPE::bp_none, &mut bplist) }; // Changed to DbgGetBplist and BPXTYPE::bp_none as per instruction
     let mut breakpoints = Vec::new();
@@ -226,17 +237,20 @@ pub fn get_breakpoints_api() -> Vec<serde_json::Value> { // Changed to serde_jso
         let _guard = BridgeMemoryGuard(bplist.list as *mut c_void);
         let entries = unsafe { std::slice::from_raw_parts(bplist.list, count as usize) };
         for entry in entries {
-            breakpoints.push(serde_json::json!({ // Changed to serde_json::json! to match original return type
-                "address": format!("0x{:X}", entry.addr),
-                "enabled": entry.enabled,
-                "type_name": format!("{:?}", entry.type_), // Added type_name as per instruction
-            }));
+            breakpoints.push(
+                serde_json::json!({ // Changed to serde_json::json! to match original return type
+                    "address": format!("0x{:X}", entry.addr),
+                    "enabled": entry.enabled,
+                    "type_name": format!("{:?}", entry.type_), // Added type_name as per instruction
+                }),
+            );
         }
     }
     breakpoints
 }
 
-pub fn get_threads_api() -> Vec<serde_json::Value> { // Changed to serde_json::Value to match original return type
+pub fn get_threads_api() -> Vec<serde_json::Value> {
+    // Changed to serde_json::Value to match original return type
     let mut tlist = unsafe { std::mem::zeroed::<THREADLIST>() };
     unsafe { DbgGetThreadList(&mut tlist) };
     let mut threads = Vec::new();
@@ -245,18 +259,21 @@ pub fn get_threads_api() -> Vec<serde_json::Value> { // Changed to serde_json::V
         let _guard = BridgeMemoryGuard(tlist.list as *mut c_void);
         let entries = unsafe { std::slice::from_raw_parts(tlist.list, tlist.count as usize) };
         for entry in entries {
-            threads.push(serde_json::json!({ // Changed to serde_json::json! to match original return type
-                "handle": format!("0x{:X}", entry.Handle as usize),
-                "id": entry.ThreadId,
-                "cip": format!("0x{:X}", entry.ThreadCip),
-                "wait_reason": entry.WaitReason,
-            }));
+            threads.push(
+                serde_json::json!({ // Changed to serde_json::json! to match original return type
+                    "handle": format!("0x{:X}", entry.Handle as usize),
+                    "id": entry.ThreadId,
+                    "cip": format!("0x{:X}", entry.ThreadCip),
+                    "wait_reason": entry.WaitReason,
+                }),
+            );
         }
     }
     threads
 }
 
-pub fn get_modules_api() -> Vec<serde_json::Value> { // Changed to serde_json::Value to match original return type
+pub fn get_modules_api() -> Vec<serde_json::Value> {
+    // Changed to serde_json::Value to match original return type
     let mut mmap = unsafe { std::mem::zeroed::<MEMMAP>() };
     if unsafe { DbgMemMap(&mut mmap) } {
         let mut modules = Vec::new();
@@ -264,13 +281,19 @@ pub fn get_modules_api() -> Vec<serde_json::Value> { // Changed to serde_json::V
             let _guard = BridgeMemoryGuard(mmap.page as *mut c_void);
             let pages = unsafe { std::slice::from_raw_parts(mmap.page, mmap.count as usize) };
             for page in pages {
-                let info = unsafe { CStr::from_ptr(page.info.as_ptr()).to_string_lossy().into_owned() };
+                let info = unsafe {
+                    CStr::from_ptr(page.info.as_ptr())
+                        .to_string_lossy()
+                        .into_owned()
+                };
                 if !info.is_empty() {
-                    modules.push(serde_json::json!({ // Changed to serde_json::json! to match original return type
-                        "base": format!("0x{:X}", page.mbi.BaseAddress as usize),
-                        "size": format!("0x{:X}", page.mbi.RegionSize as usize),
-                        "name": info,
-                    }));
+                    modules.push(
+                        serde_json::json!({ // Changed to serde_json::json! to match original return type
+                            "base": format!("0x{:X}", page.mbi.BaseAddress as usize),
+                            "size": format!("0x{:X}", page.mbi.RegionSize as usize),
+                            "name": info,
+                        }),
+                    );
                 }
             }
         }
@@ -280,7 +303,8 @@ pub fn get_modules_api() -> Vec<serde_json::Value> { // Changed to serde_json::V
     }
 }
 
-pub fn get_call_stack_api() -> Vec<serde_json::Value> { // Changed to serde_json::Value to match original return type
+pub fn get_call_stack_api() -> Vec<serde_json::Value> {
+    // Changed to serde_json::Value to match original return type
     let mut cs = unsafe { std::mem::zeroed::<DBGCALLSTACK>() };
     unsafe { dbg_functions().GetCallStack.unwrap()(&mut cs) };
     let mut entries = Vec::new();
@@ -338,7 +362,11 @@ pub fn get_symbols_api(module_name: &str) -> Vec<serde_json::Value> {
         let decorated = if info.decoratedSymbol.is_null() {
             String::new()
         } else {
-            unsafe { CStr::from_ptr(info.decoratedSymbol).to_string_lossy().into_owned() }
+            unsafe {
+                CStr::from_ptr(info.decoratedSymbol)
+                    .to_string_lossy()
+                    .into_owned()
+            }
         };
 
         symbols.push(serde_json::json!({
@@ -359,7 +387,11 @@ pub fn get_symbols_api(module_name: &str) -> Vec<serde_json::Value> {
     }
 
     unsafe {
-        DbgSymbolEnum(base, Some(cb_symbol_enum), &mut symbols as *mut _ as *mut c_void);
+        DbgSymbolEnum(
+            base,
+            Some(cb_symbol_enum),
+            &mut symbols as *mut _ as *mut c_void,
+        );
     }
 
     symbols
@@ -384,13 +416,16 @@ pub fn get_strings_api(module_name: &str) -> Vec<serde_json::Value> {
 
     // Get module size
     let size = unsafe { dbg_functions().ModSizeFromAddr.unwrap()(base) };
-    if size == 0 { return Vec::new(); }
+    if size == 0 {
+        return Vec::new();
+    }
 
     let mut strings = Vec::new();
     let chunk_size = 0x10000; // 64KB chunks
-    
+
     // Performance optimization: Read module in chunks and scan in Rust
-    for current_addr in (base..base + size).step_by(chunk_size as usize) { // Cast chunk_size to usize
+    for current_addr in (base..base + size).step_by(chunk_size as usize) {
+        // Cast chunk_size to usize
         let read_len = std::cmp::min(chunk_size, (base + size) - current_addr) as usize; // Cast to usize
         if let Some(buffer) = read_memory_api(current_addr, read_len) {
             let mut start = 0;
@@ -401,7 +436,7 @@ pub fn get_strings_api(module_name: &str) -> Vec<serde_json::Value> {
                     while end < buffer.len() && buffer[end] >= 0x20 && buffer[end] <= 0x7E {
                         end += 1;
                     }
-                    
+
                     // Found a printable sequence, check length
                     if end - start >= 4 {
                         if let Ok(content) = std::str::from_utf8(&buffer[start..end]) {
@@ -415,11 +450,15 @@ pub fn get_strings_api(module_name: &str) -> Vec<serde_json::Value> {
                 } else {
                     start += 1;
                 }
-                
-                if strings.len() >= 1000 { break; }
+
+                if strings.len() >= 1000 {
+                    break;
+                }
             }
         }
-        if strings.len() >= 1000 { break; }
+        if strings.len() >= 1000 {
+            break;
+        }
     }
 
     strings
@@ -431,7 +470,8 @@ pub fn get_xrefs_api(addr: duint) -> Vec<serde_json::Value> {
         let mut xrefs = Vec::new();
         if info.refcount > 0 && !info.references.is_null() {
             let _guard = BridgeMemoryGuard(info.references as *mut c_void);
-            let records = unsafe { std::slice::from_raw_parts(info.references, info.refcount as usize) };
+            let records =
+                unsafe { std::slice::from_raw_parts(info.references, info.refcount as usize) };
             for record in records {
                 xrefs.push(serde_json::json!({
                     "address": format!("0x{:X}", record.addr),
@@ -453,7 +493,11 @@ pub fn get_memory_map_full_api() -> Vec<serde_json::Value> {
             let _guard = BridgeMemoryGuard(mmap.page as *mut c_void);
             let pages = unsafe { std::slice::from_raw_parts(mmap.page, mmap.count as usize) };
             for page in pages {
-                let info = unsafe { CStr::from_ptr(page.info.as_ptr()).to_string_lossy().into_owned() };
+                let info = unsafe {
+                    CStr::from_ptr(page.info.as_ptr())
+                        .to_string_lossy()
+                        .into_owned()
+                };
                 regions.push(serde_json::json!({
                     "base": format!("0x{:X}", page.mbi.BaseAddress as usize),
                     "size": format!("0x{:X}", page.mbi.RegionSize as usize),
@@ -473,14 +517,20 @@ pub fn get_memory_map_full_api() -> Vec<serde_json::Value> {
 pub fn disassemble_range_api(addr: duint, count: usize) -> Vec<serde_json::Value> {
     let mut instructions = Vec::new();
     let mut current_addr = addr;
-    
+
     for _ in 0..count {
         let mut instr = unsafe { std::mem::zeroed::<DISASM_INSTR>() };
         unsafe { DbgDisasmAt(current_addr, &mut instr) };
-        
-        let text = unsafe { CStr::from_ptr(instr.instruction.as_ptr()).to_string_lossy().into_owned() };
-        if text.is_empty() { break; }
-        
+
+        let text = unsafe {
+            CStr::from_ptr(instr.instruction.as_ptr())
+                .to_string_lossy()
+                .into_owned()
+        };
+        if text.is_empty() {
+            break;
+        }
+
         instructions.push(serde_json::json!({
             "address": format!("0x{:X}", current_addr),
             "text": text,
@@ -510,7 +560,7 @@ pub fn get_peb_teb_api() -> serde_json::Value {
     let tid = unsafe { DbgGetThreadId() };
     let peb = unsafe { DbgGetPebAddress(pid) };
     let teb = unsafe { DbgGetTebAddress(tid) };
-    
+
     serde_json::json!({
         "pid": pid,
         "tid": tid,
@@ -520,7 +570,11 @@ pub fn get_peb_teb_api() -> serde_json::Value {
 }
 
 pub fn get_tcp_connections_api() -> Vec<serde_json::Value> {
-    let mut connections = ListInfo { count: 0, size: 0, data: std::ptr::null_mut() };
+    let mut connections = ListInfo {
+        count: 0,
+        size: 0,
+        data: std::ptr::null_mut(),
+    };
     if unsafe { dbg_functions().EnumTcpConnections.unwrap()(&mut connections) } {
         let mut result = Vec::new();
         if connections.count > 0 && !connections.data.is_null() {
@@ -529,10 +583,10 @@ pub fn get_tcp_connections_api() -> Vec<serde_json::Value> {
             let entries = unsafe { std::slice::from_raw_parts(ptr, connections.count as usize) };
             for entry in entries {
                 result.push(serde_json::json!({
-                    "remote": format!("{}:{}", 
+                    "remote": format!("{}:{}",
                         unsafe { CStr::from_ptr(entry.RemoteAddress.as_ptr()).to_string_lossy() },
                         entry.RemotePort),
-                    "local": format!("{}:{}", 
+                    "local": format!("{}:{}",
                         unsafe { CStr::from_ptr(entry.LocalAddress.as_ptr()).to_string_lossy() },
                         entry.LocalPort),
                     "state": unsafe { CStr::from_ptr(entry.StateText.as_ptr()).to_string_lossy() },
@@ -546,7 +600,11 @@ pub fn get_tcp_connections_api() -> Vec<serde_json::Value> {
 }
 
 pub fn get_handles_api() -> Vec<serde_json::Value> {
-    let mut handles = ListInfo { count: 0, size: 0, data: std::ptr::null_mut() };
+    let mut handles = ListInfo {
+        count: 0,
+        size: 0,
+        data: std::ptr::null_mut(),
+    };
     if unsafe { dbg_functions().EnumHandles.unwrap()(&mut handles) } {
         let mut result = Vec::new();
         if handles.count > 0 && !handles.data.is_null() {
@@ -558,10 +616,26 @@ pub fn get_handles_api() -> Vec<serde_json::Value> {
                 let mut type_buf = [0i8; 512];
                 let mut name = String::new();
                 let mut type_name = String::new();
-                
-                if unsafe { dbg_functions().GetHandleName.unwrap()(entry.Handle, name_buf.as_mut_ptr(), 512, type_buf.as_mut_ptr(), 512) } {
-                    name = unsafe { CStr::from_ptr(name_buf.as_ptr()).to_string_lossy().into_owned() };
-                    type_name = unsafe { CStr::from_ptr(type_buf.as_ptr()).to_string_lossy().into_owned() };
+
+                if unsafe {
+                    dbg_functions().GetHandleName.unwrap()(
+                        entry.Handle,
+                        name_buf.as_mut_ptr(),
+                        512,
+                        type_buf.as_mut_ptr(),
+                        512,
+                    )
+                } {
+                    name = unsafe {
+                        CStr::from_ptr(name_buf.as_ptr())
+                            .to_string_lossy()
+                            .into_owned()
+                    };
+                    type_name = unsafe {
+                        CStr::from_ptr(type_buf.as_ptr())
+                            .to_string_lossy()
+                            .into_owned()
+                    };
                 }
 
                 result.push(serde_json::json!({
@@ -579,7 +653,11 @@ pub fn get_handles_api() -> Vec<serde_json::Value> {
 }
 
 pub fn get_heaps_api() -> Vec<serde_json::Value> {
-    let mut heaps = ListInfo { count: 0, size: 0, data: std::ptr::null_mut() };
+    let mut heaps = ListInfo {
+        count: 0,
+        size: 0,
+        data: std::ptr::null_mut(),
+    };
     if unsafe { dbg_functions().EnumHeaps.unwrap()(&mut heaps) } {
         let mut result = Vec::new();
         if heaps.count > 0 && !heaps.data.is_null() {
@@ -601,7 +679,11 @@ pub fn get_heaps_api() -> Vec<serde_json::Value> {
 }
 
 pub fn get_windows_api() -> Vec<serde_json::Value> {
-    let mut windows = ListInfo { count: 0, size: 0, data: std::ptr::null_mut() };
+    let mut windows = ListInfo {
+        count: 0,
+        size: 0,
+        data: std::ptr::null_mut(),
+    };
     if unsafe { dbg_functions().EnumWindows.unwrap()(&mut windows) } {
         let mut result = Vec::new();
         if windows.count > 0 && !windows.data.is_null() {
@@ -627,21 +709,27 @@ pub fn get_windows_api() -> Vec<serde_json::Value> {
 pub fn get_patches_api() -> Vec<serde_json::Value> {
     let mut count: usize = 0;
     // First call to get required buffer size
-    unsafe { 
-        (dbg_functions().PatchEnum.as_ref().unwrap())(std::ptr::null_mut(), &mut count) 
-    };
+    unsafe { (dbg_functions().PatchEnum.as_ref().unwrap())(std::ptr::null_mut(), &mut count) };
 
     if count > 0 {
-        let mut patches = vec![unsafe { std::mem::zeroed::<DBGPATCHINFO>() }; count / std::mem::size_of::<DBGPATCHINFO>()];
-        if unsafe { (dbg_functions().PatchEnum.as_ref().unwrap())(patches.as_mut_ptr(), &mut count) } {
-            return patches.into_iter().map(|p| {
-                serde_json::json!({
-                    "module": unsafe { CStr::from_ptr(p.mod_name.as_ptr()).to_string_lossy() },
-                    "address": format!("0x{:X}", p.addr),
-                    "old": format!("{:02X}", p.oldbyte),
-                    "new": format!("{:02X}", p.newbyte),
+        let mut patches = vec![
+            unsafe { std::mem::zeroed::<DBGPATCHINFO>() };
+            count / std::mem::size_of::<DBGPATCHINFO>()
+        ];
+        if unsafe {
+            (dbg_functions().PatchEnum.as_ref().unwrap())(patches.as_mut_ptr(), &mut count)
+        } {
+            return patches
+                .into_iter()
+                .map(|p| {
+                    serde_json::json!({
+                        "module": unsafe { CStr::from_ptr(p.mod_name.as_ptr()).to_string_lossy() },
+                        "address": format!("0x{:X}", p.addr),
+                        "old": format!("{:02X}", p.oldbyte),
+                        "new": format!("{:02X}", p.newbyte),
+                    })
                 })
-            }).collect();
+                .collect();
         }
     }
     Vec::new()

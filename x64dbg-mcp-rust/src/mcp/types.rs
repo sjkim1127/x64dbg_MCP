@@ -1,5 +1,5 @@
-use serde::Deserialize;
 use crate::x64dbg::duint;
+use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
 pub struct ExecuteCommandArgs {

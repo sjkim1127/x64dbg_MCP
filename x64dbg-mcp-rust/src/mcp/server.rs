@@ -1,19 +1,18 @@
 use super::tools::*;
 use crate::x64dbg::api::log_print;
+use once_cell::sync::Lazy;
 use rmcp::{
     model::*,
     service::{Peer, RequestContext},
-    RoleServer, ServerHandler,
-    ErrorData,
     transport::{
-        StreamableHttpServerConfig, StreamableHttpService,
-        streamable_http_server::session::local::LocalSessionManager,
+        streamable_http_server::session::local::LocalSessionManager, StreamableHttpServerConfig,
+        StreamableHttpService,
     },
+    ErrorData, RoleServer, ServerHandler,
 };
+use serde_json::{json, Value};
 use std::future::Future;
 use std::sync::{Arc, Mutex};
-use once_cell::sync::Lazy;
-use serde_json::{json, Value};
 
 pub static GLOBAL_PEERS: Lazy<Mutex<Vec<Peer<RoleServer>>>> = Lazy::new(|| Mutex::new(Vec::new()));
 
@@ -24,19 +23,17 @@ pub async fn broadcast_event(level: LoggingLevel, data: Value) {
     } else {
         return;
     };
-    
+
     for peer in peers {
-        let notif = ServerNotification::LoggingMessageNotification(
-            LoggingMessageNotification {
-                params: LoggingMessageNotificationParam {
-                    level,
-                    data: data.clone(),
-                    logger: Some("x64dbg".to_string()),
-                },
-                method: LoggingMessageNotificationMethod,
-                extensions: Default::default(),
-            }
-        );
+        let notif = ServerNotification::LoggingMessageNotification(LoggingMessageNotification {
+            params: LoggingMessageNotificationParam {
+                level,
+                data: data.clone(),
+                logger: Some("x64dbg".to_string()),
+            },
+            method: LoggingMessageNotificationMethod,
+            extensions: Default::default(),
+        });
         let _ = peer.send_notification(notif).await;
     }
 }
@@ -63,12 +60,10 @@ impl ServerHandler for X64DbgMcpServer {
             if let Ok(mut peers) = GLOBAL_PEERS.lock() {
                 peers.push(peer);
             }
-            Ok(InitializeResult::new(
-                ServerCapabilities::builder()
-                    .enable_tools()
-                    .build(),
+            Ok(
+                InitializeResult::new(ServerCapabilities::builder().enable_tools().build())
+                    .with_server_info(Implementation::new("x64dbg-rust-mcp", "0.1.0")),
             )
-            .with_server_info(Implementation::new("x64dbg-rust-mcp", "0.1.0")))
         }
     }
 
@@ -501,8 +496,11 @@ pub async fn start_mcp_server() {
         .and_then(|p| p.parse::<u16>().ok())
         .unwrap_or(50301);
     let bind_addr = format!("127.0.0.1:{}", port);
-    log_print(&format!("Starting MCP server listener on http://{} ...\n", bind_addr));
-    
+    log_print(&format!(
+        "Starting MCP server listener on http://{} ...\n",
+        bind_addr
+    ));
+
     let shutdown_token = super::events::SHUTDOWN_TOKEN.clone();
 
     // Start background event loop for sending notifications to all peers
@@ -527,13 +525,13 @@ pub async fn start_mcp_server() {
             });
         }
     }
-    
+
     let server = X64DbgMcpServer;
     let config = StreamableHttpServerConfig {
         stateful_mode: true,
         ..Default::default()
     };
-    
+
     let service = StreamableHttpService::new(
         move || Ok(server.clone()),
         LocalSessionManager::default().into(),
@@ -542,14 +540,13 @@ pub async fn start_mcp_server() {
 
     let router = axum::Router::new().nest_service("/mcp", service);
     let bind_addr = "127.0.0.1:50301";
-    
+
     let server_shutdown = shutdown_token.clone();
     match tokio::net::TcpListener::bind(bind_addr).await {
         Ok(listener) => {
-            let server = axum::serve(listener, router)
-                .with_graceful_shutdown(async move {
-                    server_shutdown.cancelled().await;
-                });
+            let server = axum::serve(listener, router).with_graceful_shutdown(async move {
+                server_shutdown.cancelled().await;
+            });
             if let Err(e) = server.await {
                 log_print(&format!("MCP Server Error: {}\n", e));
             }

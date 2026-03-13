@@ -10,15 +10,15 @@ impl<S: Subscriber> Layer<S> for X64DbgLogLayer {
         let level = *event.metadata().level();
         let mut visitor = StringVisitor::new();
         event.record(&mut visitor);
-        
+
         let prefix = match level {
             Level::ERROR => "[ERROR] ",
-            Level::WARN  => "[WARN] ",
-            Level::INFO  => "[INFO] ",
+            Level::WARN => "[WARN] ",
+            Level::INFO => "[INFO] ",
             Level::DEBUG => "[DEBUG] ",
             Level::TRACE => "[TRACE] ",
         };
-        
+
         let msg = format!("{}{}\n", prefix, visitor.0);
         log_print(&msg);
     }
@@ -38,7 +38,7 @@ impl tracing::field::Visit for StringVisitor {
             self.0 = format!("{:?}", value);
         }
     }
-    
+
     fn record_str(&mut self, field: &tracing::field::Field, value: &str) {
         if field.name() == "message" {
             self.0 = value.to_string();
