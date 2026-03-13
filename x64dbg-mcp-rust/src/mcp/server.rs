@@ -259,7 +259,7 @@ impl ServerHandler for X64DbgMcpServer {
                         })))
                     ),
                     Tool::new(
-                        "Misc_ParseExpression",
+                        "MiscParseExpression",
                         "Evaluates a complex expression (e.g. '[eax]+4') via '? expr' and returns the evaluated integer.",
                         Arc::new(to_json_object(json!({
                             "type": "object",
@@ -315,17 +315,6 @@ impl ServerHandler for X64DbgMcpServer {
                             },
                             "required": ["address", "fields"]
                         }))),
-                    ),
-                    Tool::new(
-                        "MiscParseExpression",
-                        "Parse x64dbg expression (e.g. [eax+4])",
-                        Arc::new(to_json_object(json!({
-                            "type": "object",
-                            "properties": {
-                                "expression": { "type": "string", "description": "Expression string" }
-                            },
-                            "required": ["expression"]
-                        })))
                     ),
                     Tool::new(
                         "GetSymbols",
@@ -463,7 +452,6 @@ impl ServerHandler for X64DbgMcpServer {
                 "PatternFindMem" => handle_pattern_find_mem(request).await,
                 "MemoryIsValidPtr" => handle_memory_is_valid_ptr(request).await,
                 "MiscParseExpression" => handle_misc_parse_expression(request).await,
-                "Misc_ParseExpression" => tools::handle_misc_parse_expression(request).await,
                 "YaraScanMem" => tools::handle_yara_scan_mem(request).await,
                 "AnalyzeFunction" => tools::handle_analyze_function(request).await,
                 "StructDumpMem" => tools::handle_struct_dump_mem(request).await,
@@ -539,10 +527,10 @@ pub async fn start_mcp_server() {
     );
 
     let router = axum::Router::new().nest_service("/mcp", service);
-    let bind_addr = "127.0.0.1:50301";
+    let listen_addr = bind_addr.clone();
 
     let server_shutdown = shutdown_token.clone();
-    match tokio::net::TcpListener::bind(bind_addr).await {
+    match tokio::net::TcpListener::bind(&listen_addr).await {
         Ok(listener) => {
             let server = axum::serve(listener, router).with_graceful_shutdown(async move {
                 server_shutdown.cancelled().await;

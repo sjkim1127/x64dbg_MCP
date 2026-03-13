@@ -165,17 +165,6 @@ extern "C" {
     pub fn DbgAnalyzeFunction(entry: duint, graph: *mut BridgeCFGraphList) -> bool;
 }
 
-extern "C" {
-    pub fn DbgXrefGet(addr: duint, info: *mut XREF_INFO) -> bool;
-    pub fn DbgDisasmAt(addr: duint, instr: *mut DISASM_INSTR);
-    pub fn DbgGetBookmarkAt(addr: duint) -> bool;
-    pub fn DbgSetBookmarkAt(addr: duint, is_bookmark: bool) -> bool;
-    pub fn DbgGetPebAddress(process_id: u32) -> duint;
-    pub fn DbgGetTebAddress(thread_id: u32) -> duint;
-    pub fn DbgGetProcessId() -> u32;
-    pub fn DbgGetThreadId_() -> u32; // Renamed to avoid conflict
-}
-
 pub fn log_print(msg: &str) {
     if let Ok(msg_c) = CString::new(msg) {
         unsafe {
