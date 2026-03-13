@@ -9,22 +9,34 @@ use crate::mcp::types::*;
 use crate::x64dbg;
 use crate::x64dbg::api::*;
 use crate::x64dbg::{
-    BridgeCFGraphList, BridgeCFInstruction, BridgeCFNodeList, BridgeFree, DbgAnalyzeFunction,
-    DbgFunctionGet, DbgGetStringAt, duint,
+    duint, BridgeCFGraphList, BridgeCFInstruction, BridgeCFNodeList, BridgeFree,
+    DbgAnalyzeFunction, DbgFunctionGet, DbgGetStringAt,
 };
 
 pub enum DbgRequest {
     ExecuteCommand(String),
-    ReadMemory { address: usize, size: usize },
+    ReadMemory {
+        address: usize,
+        size: usize,
+    },
     GetRegisters,
-    SetRegister { register: String, value: String },
+    SetRegister {
+        register: String,
+        value: String,
+    },
     GetBreakpoints,
     SetBreakpoint(String), // address hex
     GetThreads,
     GetModules,
     GetCallStack,
-    SetComment { address: usize, text: String },
-    SetLabel { address: usize, text: String },
+    SetComment {
+        address: usize,
+        text: String,
+    },
+    SetLabel {
+        address: usize,
+        text: String,
+    },
     MemoryIsValidPtr(usize),
     AnalyzeFunction(usize),
     GetSymbols(String),    // module name
@@ -32,11 +44,25 @@ pub enum DbgRequest {
     ExecuteScript(String), // Rhai script content
     GetXrefs(usize),
     GetMemoryMapFull,
-    DisassembleRange { address: usize, count: usize },
-    Bookmark { address: usize, is_set: bool },
-    AssembleMem { address: String, instruction: String },
-    PatternFindMem { start: String, pattern: String },
-    MiscParseExpression { expression: String },
+    DisassembleRange {
+        address: usize,
+        count: usize,
+    },
+    Bookmark {
+        address: usize,
+        is_set: bool,
+    },
+    AssembleMem {
+        address: String,
+        instruction: String,
+    },
+    PatternFindMem {
+        start: String,
+        pattern: String,
+    },
+    MiscParseExpression {
+        expression: String,
+    },
     GetPebTeb,
     GetTcpConnections,
     GetHandles,

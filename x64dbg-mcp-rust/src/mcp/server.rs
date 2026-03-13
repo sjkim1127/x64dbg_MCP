@@ -2,12 +2,12 @@ use super::tools::*;
 use crate::x64dbg::api::log_print;
 use once_cell::sync::Lazy;
 use rmcp::{
-    model::*, ErrorData, Resource, Server, Tool,
+    model::*,
     service::{Peer, RequestContext},
     transport::{
         streamable_http_server::session::local::LocalSessionManager, StreamableHttpServerConfig,
     },
-    ServerHandler,
+    ErrorData, Resource, Server, ServerHandler, Tool,
 };
 use serde_json::{json, Value};
 use std::future::Future;
