@@ -444,3 +444,42 @@ fn json_to_rhai(v: serde_json::Value) -> Dynamic {
         }
     }
 }
+#[cfg(test)]
+pub async fn run_mock_task_loop() {
+    let rx = GLOBAL_RX.get().expect("GLOBAL_RX not initialized");
+    while let Ok(task) = rx.try_recv() {
+        let response = match task.request {
+            DbgRequest::ExecuteCommand(_) => DbgResponse::CommandSuccess(true),
+            DbgRequest::ReadMemory { .. } => DbgResponse::MemoryData(Some(vec![0; 16])),
+            _ => DbgResponse::Boolean(true),
+        };
+        let _ = task.responder.send(response);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_task_dispatch() {
+        let (resp_tx, resp_rx) = oneshot::channel();
+        let task = McpTask {
+            request: DbgRequest::ExecuteCommand("test".to_string()),
+            responder: resp_tx,
+        };
+
+        // Initialize channel if needed
+        let _ = TASK_TX.send(task);
+
+        // Process mock loop
+        run_mock_task_loop().await;
+
+        let response = resp_rx.await.unwrap();
+        if let DbgResponse::CommandSuccess(success) = response {
+            assert!(success);
+        } else {
+            panic!("Unexpected response");
+        }
+    }
+}

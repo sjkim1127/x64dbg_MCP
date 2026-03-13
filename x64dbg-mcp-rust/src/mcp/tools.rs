@@ -759,3 +759,43 @@ pub async fn handle_get_windows(
         _ => Err(ErrorData::internal_error("Unexpected response value", None)),
     }
 }
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_hex() {
+        assert_eq!(parse_hex("0x123").unwrap(), 0x123);
+        assert_eq!(parse_hex("ABC").unwrap(), 0xABC);
+        assert!(parse_hex("invalid").is_err());
+    }
+
+    #[test]
+    fn test_sizeof_type() {
+        assert_eq!(sizeof_type("u8"), 1);
+        assert_eq!(sizeof_type("u32"), 4);
+        assert_eq!(sizeof_type("u64"), 8);
+        assert_eq!(sizeof_type("char[16]"), 16);
+        assert_eq!(sizeof_type("ptr"), 8);
+    }
+
+    #[test]
+    fn test_alignof_type() {
+        assert_eq!(alignof_type("u8"), 1);
+        assert_eq!(alignof_type("u16"), 2);
+        assert_eq!(alignof_type("u32"), 4);
+        assert_eq!(alignof_type("u64"), 8);
+        assert_eq!(alignof_type("char[16]"), 1);
+    }
+
+    #[test]
+    fn test_parse_value() {
+        let data = vec![0x39, 0x05, 0x00, 0x00];
+        let val = parse_value(&data, "u32");
+        assert_eq!(val, serde_json::json!("0x00000539"));
+
+        let data = vec![b'H', b'e', b'l', b'l', b'o', 0x00];
+        let val = parse_value(&data, "char[6]");
+        assert_eq!(val, serde_json::json!("Hello"));
+    }
+}

@@ -45,6 +45,14 @@ jobs:
         run: cargo build --release --verbose
         working-directory: x64dbg-mcp-rust
 
+      - name: Run Tests
+        run: cargo test --verbose
+        working-directory: x64dbg-mcp-rust
+
+      - name: Smoke Test (Verify DLL)
+        run: python ../scripts/smoke_test.py
+        working-directory: x64dbg-mcp-rust
+
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
