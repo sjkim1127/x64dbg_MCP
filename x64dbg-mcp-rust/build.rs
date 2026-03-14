@@ -19,12 +19,13 @@ fn main() {
 
     let bindings = bindgen::Builder::default()
         .header("wrapper.h")
+        .clang_arg(format!("-I{}", sdk_path.display()))
         // Windows specific macros
         .clang_arg("-D_WIN64")
         .clang_arg("-DWIN32_LEAN_AND_MEAN")
         // Don't generate bindings for basic Windows stuff if possible, but keep it simple
         .allowlist_function(".*(plugin|Dbg|Gui|Bridge|Script).*")
-        .allowlist_type("(?i).*(PLUG_|BRIDGE|CB_TYPE|ExpressionValue|ValueType|duint|BASIC_INSTRUCTION_INFO|SYMBOL|TCP|HANDLE|HEAP|WINDOW|PATCH|BridgeCF).*")
+        .allowlist_type("(?i).*(PLUG_|BRIDGE|CB_TYPE|ExpressionValue|ValueType|duint|BASIC_INSTRUCTION_INFO|SYMBOL|TCP|HANDLE|HEAP|WINDOW|PATCH|BridgeCF|ListInfo|RECT|XREF|CALLSTACK|DISASM|BPMAP|THREADLIST|MEMMAP).*")
         .allowlist_var("(?i).*(PLUG_|CB_|SYMBOL|BPX|BridgeCF).*")
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .generate()
