@@ -185,7 +185,7 @@ pub fn get_symbols_api(module_name: &str) -> Vec<serde_json::Value> {
     extern "C" fn cb_symbol_enum(symbol: *const SYMBOLPTR, user: *mut c_void) -> bool {
         let symbols = unsafe { &mut *(user as *mut Vec<serde_json::Value>) };
         let mut info = unsafe { std::mem::zeroed::<SYMBOLINFO>() };
-        unsafe { DbgGetSymbolInfo(symbol, &mut info) };
+        unsafe { DbgGetSymbolInfo(symbol as *const _, &mut info) };
 
         let decorated = if info.decoratedSymbol.is_null() {
             String::new()
