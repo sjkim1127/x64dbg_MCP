@@ -50,37 +50,32 @@ fn to_json_object(v: Value) -> JsonObject {
 pub struct X64DbgMcpServer;
 
 impl ServerHandler for X64DbgMcpServer {
-    fn initialize(
+    async fn initialize(
         &self,
-        _request: InitializeRequestParams,
+        request: InitializeRequestParams,
         cx: RequestContext<RoleServer>,
-    ) -> impl Future<Output = Result<InitializeResult, ErrorData>> + Send + '_ {
+    ) -> Result<InitializeResult, ErrorData> {
         let peer = cx.peer.clone();
-        async move {
-            if let Ok(mut peers) = GLOBAL_PEERS.lock() {
-                peers.push(peer);
-            }
-            Ok(
-                InitializeResult::new(ServerCapabilities::builder().enable_tools().build())
-                    .with_server_info(Implementation::new("x64dbg-rust-mcp", "0.1.0")),
-            )
+        if let Ok(mut peers) = GLOBAL_PEERS.lock() {
+            peers.push(peer);
         }
+        if cx.peer.peer_info().is_none() {
+            cx.peer.set_peer_info(request);
+        }
+        Ok(InitializeResult::new(ServerCapabilities::builder().enable_tools().build())
+            .with_server_info(Implementation::new("x64dbg-rust-mcp", "0.1.0")))
     }
 
-    fn ping(
-        &self,
-        _cx: RequestContext<RoleServer>,
-    ) -> impl Future<Output = Result<(), ErrorData>> + Send + '_ {
-        async move { Ok(()) }
+    async fn ping(&self, _cx: RequestContext<RoleServer>) -> Result<(), ErrorData> {
+        Ok(())
     }
 
-    fn list_tools(
+    async fn list_tools(
         &self,
         _request: Option<PaginatedRequestParams>,
         _cx: RequestContext<RoleServer>,
-    ) -> impl Future<Output = Result<ListToolsResult, ErrorData>> + Send + '_ {
-        async move {
-            Ok(ListToolsResult {
+    ) -> Result<ListToolsResult, ErrorData> {
+        Ok(ListToolsResult {
                 tools: vec![
                     Tool::new(
                         "ExecuteCommand",
@@ -424,55 +419,53 @@ impl ServerHandler for X64DbgMcpServer {
         }
     }
 
-    fn call_tool(
+    async fn call_tool(
         &self,
         request: CallToolRequestParams,
         _cx: RequestContext<RoleServer>,
-    ) -> impl Future<Output = Result<CallToolResult, ErrorData>> + Send + '_ {
-        async move {
-            match &*request.name {
-                "ExecuteCommand" => handle_execute_command(request).await,
-                "ReadMemory" => handle_read_memory(request).await,
-                "GetRegisters" => handle_get_registers(request).await,
-                "SetRegister" => handle_set_register(request).await,
-                "GetBreakpoints" => handle_get_breakpoints(request).await,
-                "SetBreakpoint" => handle_set_breakpoint(request).await,
-                "GetThreads" => handle_get_threads(request).await,
-                "GetModules" => handle_get_modules(request).await,
-                "GetCallStack" => handle_get_call_stack(request).await,
-                "SetComment" => handle_set_comment(request).await,
-                "SetLabel" => handle_set_label(request).await,
-                "DebugRun" => handle_debug_run(request).await,
-                "DebugPause" => handle_debug_pause(request).await,
-                "DebugStop" => handle_debug_stop(request).await,
-                "DebugStepIn" => handle_debug_step_in(request).await,
-                "DebugStepOver" => handle_debug_step_over(request).await,
-                "DebugStepOut" => handle_debug_step_out(request).await,
-                "AssembleMem" => handle_assemble_mem(request).await,
-                "PatternFindMem" => handle_pattern_find_mem(request).await,
-                "MemoryIsValidPtr" => handle_memory_is_valid_ptr(request).await,
-                "MiscParseExpression" => handle_misc_parse_expression(request).await,
-                "YaraScanMem" => handle_yara_scan_mem(request).await,
-                "AnalyzeFunction" => handle_analyze_function(request).await,
-                "StructDumpMem" => handle_struct_dump_mem(request).await,
-                "GetSymbols" => handle_get_symbols(request).await,
-                "GetStrings" => handle_get_strings(request).await,
-                "ExecuteScript" => handle_execute_script(request).await,
-                "GetXrefs" => handle_get_xrefs(request).await,
-                "GetMemoryMapFull" => handle_get_memory_map_full(request).await,
-                "DisassembleRange" => handle_disassemble_range(request).await,
-                "SetBookmark" => handle_bookmark(request).await,
-                "GetPebTeb" => handle_get_peb_teb(request).await,
-                "GetTcpConnections" => handle_get_tcp_connections(request).await,
-                "GetHandles" => handle_get_handles(request).await,
-                "GetPatches" => handle_get_patches(request).await,
-                "GetHeaps" => handle_get_heaps(request).await,
-                "GetWindows" => handle_get_windows(request).await,
-                _ => Err(ErrorData::invalid_params(
-                    format!("Unknown tool: {}", request.name),
-                    None,
-                )),
-            }
+    ) -> Result<CallToolResult, ErrorData> {
+        match &*request.name {
+            "ExecuteCommand" => handle_execute_command(request).await,
+            "ReadMemory" => handle_read_memory(request).await,
+            "GetRegisters" => handle_get_registers(request).await,
+            "SetRegister" => handle_set_register(request).await,
+            "GetBreakpoints" => handle_get_breakpoints(request).await,
+            "SetBreakpoint" => handle_set_breakpoint(request).await,
+            "GetThreads" => handle_get_threads(request).await,
+            "GetModules" => handle_get_modules(request).await,
+            "GetCallStack" => handle_get_call_stack(request).await,
+            "SetComment" => handle_set_comment(request).await,
+            "SetLabel" => handle_set_label(request).await,
+            "DebugRun" => handle_debug_run(request).await,
+            "DebugPause" => handle_debug_pause(request).await,
+            "DebugStop" => handle_debug_stop(request).await,
+            "DebugStepIn" => handle_debug_step_in(request).await,
+            "DebugStepOver" => handle_debug_step_over(request).await,
+            "DebugStepOut" => handle_debug_step_out(request).await,
+            "AssembleMem" => handle_assemble_mem(request).await,
+            "PatternFindMem" => handle_pattern_find_mem(request).await,
+            "MemoryIsValidPtr" => handle_memory_is_valid_ptr(request).await,
+            "MiscParseExpression" => handle_misc_parse_expression(request).await,
+            "YaraScanMem" => handle_yara_scan_mem(request).await,
+            "AnalyzeFunction" => handle_analyze_function(request).await,
+            "StructDumpMem" => handle_struct_dump_mem(request).await,
+            "GetSymbols" => handle_get_symbols(request).await,
+            "GetStrings" => handle_get_strings(request).await,
+            "ExecuteScript" => handle_execute_script(request).await,
+            "GetXrefs" => handle_get_xrefs(request).await,
+            "GetMemoryMapFull" => handle_get_memory_map_full(request).await,
+            "DisassembleRange" => handle_disassemble_range(request).await,
+            "SetBookmark" => handle_bookmark(request).await,
+            "GetPebTeb" => handle_get_peb_teb(request).await,
+            "GetTcpConnections" => handle_get_tcp_connections(request).await,
+            "GetHandles" => handle_get_handles(request).await,
+            "GetPatches" => handle_get_patches(request).await,
+            "GetHeaps" => handle_get_heaps(request).await,
+            "GetWindows" => handle_get_windows(request).await,
+            _ => Err(ErrorData::invalid_params(
+                format!("Unknown tool: {}", request.name),
+                None,
+            )),
         }
     }
 }

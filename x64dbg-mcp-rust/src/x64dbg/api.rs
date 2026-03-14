@@ -52,7 +52,7 @@ impl Drop for BridgeMemoryGuard {
 
 // Helper to access DbgFunctions safely
 fn dbg_functions() -> &'static DBGFUNCTIONS_ {
-    unsafe { &*(DbgFunctions() as *const DBGFUNCTIONS_) }
+    unsafe { &*DbgFunctions() }
 }
 
 pub fn get_breakpoints_api() -> Vec<serde_json::Value> {
@@ -217,9 +217,10 @@ pub fn get_symbols_api(module_name: &str) -> Vec<serde_json::Value> {
     unsafe {
         DbgSymbolEnum(
             base,
-            Some(std::mem::transmute(
-                cb_symbol_enum as extern "C" fn(*const SYMBOLPTR, *mut c_void) -> bool,
-            )),
+            Some(std::mem::transmute::<
+                extern "C" fn(*const SYMBOLPTR, *mut c_void) -> bool,
+                unsafe extern "C" fn(*const SYMBOLPTR, *mut c_void) -> bool,
+            >(cb_symbol_enum)),
             &mut symbols as *mut _ as *mut c_void,
         );
     }

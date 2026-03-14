@@ -10,7 +10,7 @@ use mcp::server::start_mcp_server;
 use x64dbg::api::log_print;
 
 #[no_mangle]
-pub extern "C" fn pluginit(init_struct: *mut PLUG_INITSTRUCT) -> bool {
+pub unsafe extern "C" fn pluginit(init_struct: *mut PLUG_INITSTRUCT) -> bool {
     unsafe {
         (*init_struct).pluginVersion = 1;
         (*init_struct).sdkVersion = PLUG_SDKVERSION as i32;
@@ -38,10 +38,13 @@ pub extern "C" fn pluginit(init_struct: *mut PLUG_INITSTRUCT) -> bool {
     mcp::events::register_callbacks(unsafe { (*init_struct).pluginHandle });
 
     // Initialize the event channel
-    let _ = mcp::events::EVENT_TX.send(serde_json::json!({
+    let event = serde_json::json!({
         "event": "PLUGIN_START",
         "message": "x64dbg MCP plugin started"
-    }));
+    });
+    tokio::spawn(async move {
+        let _ = mcp::events::EVENT_TX.send(event);
+    });
 
     // Start MCP server in a background thread
     thread::spawn(|| {
@@ -52,7 +55,7 @@ pub extern "C" fn pluginit(init_struct: *mut PLUG_INITSTRUCT) -> bool {
 }
 
 #[no_mangle]
-pub extern "C" fn plugsetup(_setup_struct: *mut c_void) -> bool {
+pub unsafe extern "C" fn plugsetup(_setup_struct: *mut c_void) -> bool {
     true
 }
 
