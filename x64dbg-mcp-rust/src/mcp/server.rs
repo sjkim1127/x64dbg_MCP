@@ -8,7 +8,7 @@ use rmcp::{
         streamable_http_server::session::local::LocalSessionManager, StreamableHttpServerConfig,
         StreamableHttpService,
     },
-    ErrorData, Resource, RoleServer, Server, ServerHandler, Tool,
+    ErrorData, RoleServer, ServerHandler,
 };
 use serde_json::{json, Value};
 use std::future::Future;
@@ -33,7 +33,7 @@ pub async fn broadcast_event(level: LoggingLevel, data: Value) {
         let peer2 = peer.clone();
         let notif2 = notif.clone();
         tokio::spawn(async move {
-            let _ = peer2.notify(notif2).await;
+            let _ = peer2.send_notification(notif2).await;
         });
     }
 }

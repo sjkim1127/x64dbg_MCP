@@ -9,7 +9,8 @@ use tokio::sync::oneshot;
 use crate::mcp::types::*;
 use crate::x64dbg::api::*;
 use crate::x64dbg::{
-    duint, BridgeCFGraphList, BridgeFree, DbgAnalyzeFunction, DbgFunctionGet, DbgGetStringAt,
+    duint, BridgeCFGraphList, BridgeCFInstruction, BridgeCFNodeList, BridgeFree,
+    DbgAnalyzeFunction, DbgFunctionGet, DbgGetStringAt,
 };
 
 pub enum DbgRequest {
@@ -389,54 +390,30 @@ static RHAI_ENGINE: Lazy<Engine> = Lazy::new(|| {
     engine.register_fn("get_breakpoints", || -> Array {
         let v =
             serde_json::to_value(get_breakpoints_api()).unwrap_or(serde_json::Value::Array(vec![]));
-        if let Dynamic::Array(a) = json_to_rhai(v) {
-            a
-        } else {
-            Array::new()
-        }
+        json_to_rhai(v).into_array().unwrap_or_default()
     });
     engine.register_fn("get_modules", || -> Array {
         let v = serde_json::to_value(get_modules_api()).unwrap_or(serde_json::Value::Array(vec![]));
-        if let Dynamic::Array(a) = json_to_rhai(v) {
-            a
-        } else {
-            Array::new()
-        }
+        json_to_rhai(v).into_array().unwrap_or_default()
     });
     engine.register_fn("get_threads", || -> Array {
         let v = serde_json::to_value(get_threads_api()).unwrap_or(serde_json::Value::Array(vec![]));
-        if let Dynamic::Array(a) = json_to_rhai(v) {
-            a
-        } else {
-            Array::new()
-        }
+        json_to_rhai(v).into_array().unwrap_or_default()
     });
     engine.register_fn("get_call_stack", || -> Array {
         let v =
             serde_json::to_value(get_call_stack_api()).unwrap_or(serde_json::Value::Array(vec![]));
-        if let Dynamic::Array(a) = json_to_rhai(v) {
-            a
-        } else {
-            Array::new()
-        }
+        json_to_rhai(v).into_array().unwrap_or_default()
     });
     engine.register_fn("get_symbols", |module: &str| -> Array {
         let v = serde_json::to_value(get_symbols_api(module))
             .unwrap_or(serde_json::Value::Array(vec![]));
-        if let Dynamic::Array(a) = json_to_rhai(v) {
-            a
-        } else {
-            Array::new()
-        }
+        json_to_rhai(v).into_array().unwrap_or_default()
     });
     engine.register_fn("get_strings", |module: &str| -> Array {
         let v = serde_json::to_value(get_strings_api(module))
             .unwrap_or(serde_json::Value::Array(vec![]));
-        if let Dynamic::Array(a) = json_to_rhai(v) {
-            a
-        } else {
-            Array::new()
-        }
+        json_to_rhai(v).into_array().unwrap_or_default()
     });
 
     engine

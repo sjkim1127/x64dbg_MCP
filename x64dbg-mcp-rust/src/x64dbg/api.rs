@@ -1,6 +1,4 @@
 use super::*;
-use serde::Serialize;
-use std::collections::HashSet;
 use std::ffi::{CStr, CString};
 use std::os::raw::{c_char, c_void};
 
@@ -92,7 +90,7 @@ pub struct XREF_INFO {
 }
 
 // Use the bindings' DBGFUNCTIONS_ instead of manual definition
-pub use bindings::DBGFUNCTIONS_ as DBGFUNCTIONS;
+pub use DBGFUNCTIONS_ as DBGFUNCTIONS;
 
 #[repr(C)]
 pub struct DBGCALLSTACK {
@@ -193,8 +191,8 @@ impl Drop for BridgeMemoryGuard {
 }
 
 // Helper to access DbgFunctions safely
-fn dbg_functions() -> &'static bindings::DBGFUNCTIONS_ {
-    unsafe { &*(DbgFunctions() as *const bindings::DBGFUNCTIONS_) }
+fn dbg_functions() -> &'static DBGFUNCTIONS_ {
+    unsafe { &*(DbgFunctions() as *const DBGFUNCTIONS_) }
 }
 
 pub fn get_breakpoints_api() -> Vec<serde_json::Value> {
