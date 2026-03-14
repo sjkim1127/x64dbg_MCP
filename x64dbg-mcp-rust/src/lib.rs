@@ -7,7 +7,7 @@ use std::thread;
 
 use mcp::server::start_mcp_server;
 use x64dbg::api::log_print;
-use x64dbg::{PLUG_INITSTRUCT, PLUG_SDKVERSION};
+use crate::x64dbg::{PLUG_INITSTRUCT, PLUG_SDKVERSION};
 
 #[no_mangle]
 pub extern "C" fn pluginit(init_struct: *mut PLUG_INITSTRUCT) -> bool {

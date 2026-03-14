@@ -25,8 +25,8 @@ fn main() {
         .clang_arg("-DWIN32_LEAN_AND_MEAN")
         // Don't generate bindings for basic Windows stuff if possible, but keep it simple
         .allowlist_function(".*(plugin|Dbg|Gui|Bridge|Script).*")
-        .allowlist_type("(?i).*(PLUG_|BRIDGE|CB_TYPE|ExpressionValue|ValueType|duint|BASIC_INSTRUCTION_INFO|SYMBOL|TCP|HANDLE|HEAP|WINDOW|PATCH|BridgeCF|ListInfo|RECT|XREF|CALLSTACK|DISASM|BPMAP|THREADLIST|MEMMAP).*")
-        .allowlist_var("(?i).*(PLUG_|CB_|SYMBOL|BPX|BridgeCF).*")
+        .allowlist_type("(?i).*(PLUG_|BRIDGE|CB_TYPE|ExpressionValue|ValueType|duint|BASIC_INSTRUCTION_INFO|SYMBOL|TCP|HANDLE|HEAP|WINDOW|PATCH|BridgeCF|ListInfo|RECT|XREF|CALLSTACK|DISASM|BPMAP|THREADLIST|MEMMAP|PLUG_INITSTRUCT|TCPCONNECTIONINFO|HANDLEINFO|HEAPINFO|WINDOW_INFO|BridgeCFInstruction|BridgeCFNodeList).*")
+        .allowlist_var("(?i).*(PLUG_|CB_|SYMBOL|BPX|BridgeCF|PLUG_SDKVERSION).*")
         .parse_callbacks(Box::new(bindgen::CargoCallbacks::new()))
         .generate()
         .expect("Unable to generate bindings");

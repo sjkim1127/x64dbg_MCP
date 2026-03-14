@@ -1,6 +1,6 @@
 use super::*;
 use std::ffi::{CStr, CString};
-use std::os::raw::{c_char, c_void};
+use std::os::raw::c_void;
 
 pub const MEM_IMAGE_VAL: u32 = 0x1000000;
 
@@ -58,7 +58,7 @@ fn dbg_functions() -> &'static DBGFUNCTIONS_ {
 pub fn get_breakpoints_api() -> Vec<serde_json::Value> {
     // Changed to serde_json::Value to match original return type
     let mut bplist = unsafe { std::mem::zeroed::<BPMAP>() };
-    let count = unsafe { DbgGetBplist(BPXTYPE_bp_none, &mut bplist) }; // Changed to DbgGetBplist and BPXTYPE_bp_none as per instruction
+    let count = unsafe { DbgGetBpList(BPXTYPE_bp_none, &mut bplist) }; // Fixed to DbgGetBpList as per bindgen
     let mut breakpoints = Vec::new();
 
     if count > 0 && !bplist.bp.is_null() {
@@ -185,7 +185,7 @@ pub fn get_symbols_api(module_name: &str) -> Vec<serde_json::Value> {
     extern "C" fn cb_symbol_enum(symbol: *const SYMBOLPTR, user: *mut c_void) -> bool {
         let symbols = unsafe { &mut *(user as *mut Vec<serde_json::Value>) };
         let mut info = unsafe { std::mem::zeroed::<SYMBOLINFO>() };
-        unsafe { DbgGetSymbolInfo(symbol as *const c_void, &mut info) };
+        unsafe { DbgGetSymbolInfo(symbol, &mut info) };
 
         let decorated = if info.decoratedSymbol.is_null() {
             String::new()
@@ -549,7 +549,7 @@ pub fn get_patches_api() -> Vec<serde_json::Value> {
                 .into_iter()
                 .map(|p| {
                     serde_json::json!({
-                        "module": unsafe { CStr::from_ptr(p.mod_name.as_ptr()).to_string_lossy() },
+                        "module": unsafe { CStr::from_ptr(p.mod_.as_ptr()).to_string_lossy() },
                         "address": format!("0x{:X}", p.addr),
                         "old": format!("{:02X}", p.oldbyte),
                         "new": format!("{:02X}", p.newbyte),
